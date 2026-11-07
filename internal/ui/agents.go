@@ -223,7 +223,7 @@ func (m *Model) agentRows() []agentRow {
 		head := agentRow{key: "s:" + s.ID, sess: s}
 		var group []agentRow
 		for i, a := range as {
-			if !inTab(a, m.agentTab) {
+			if !inTab(a, m.agentTab) || !m.agentMatches(a, ps[i]) {
 				continue
 			}
 			head.tally(a)
@@ -232,7 +232,7 @@ func (m *Model) agentRows() []agentRow {
 		if len(group) == 0 {
 			continue
 		}
-		if m.collapsed[s.ID] {
+		if m.collapsed[s.ID] && m.agentFilter == "" { // a filter shows every match
 			group = nil
 		}
 		group = append([]agentRow{head}, group...)
@@ -247,6 +247,47 @@ func (m *Model) agentRows() []agentRow {
 		rows = append(rows, g...)
 	}
 	return rows
+}
+
+// agentMatches tests an agent against the Agents page filter: its program,
+// session, window, state, summary, waiting reason and directory.
+func (m *Model) agentMatches(a *agent.Agent, p *tmux.Pane) bool {
+	if m.agentFilter == "" {
+		return true
+	}
+	where := ""
+	path := ""
+	if p != nil {
+		where = fmt.Sprintf("%s:%d %s", p.Window.Session.Name, p.Window.Index, p.Window.Name)
+		path = tildePath(p.Path)
+	}
+	ok, _ := matchFields(m.agentFilter, string(a.Kind)+" "+where, a.Label(), a.Summary, a.Waiting, path)
+	return ok
+}
+
+// handleAgentFilterKey handles a key while the Agents page filter input is active.
+func (m *Model) handleAgentFilterKey(k tea.KeyMsg) tea.Cmd {
+	switch k.String() {
+	case "enter":
+		m.filtering = false
+		return m.fetchPreview()
+	case "esc":
+		m.filtering = false
+		m.agentFilter = ""
+		m.normalizeAgents()
+		return m.fetchPreview()
+	case "down", "ctrl+j", "ctrl+n":
+		m.moveAgent(1)
+		return m.fetchPreview()
+	case "up", "ctrl+k", "ctrl+p":
+		m.moveAgent(-1)
+		return m.fetchPreview()
+	}
+	var cmd tea.Cmd
+	m.filterIn, cmd = m.filterIn.Update(k)
+	m.agentFilter = m.filterIn.Value()
+	m.normalizeAgents()
+	return tea.Batch(cmd, m.fetchPreview())
 }
 
 // agentCursor is the index of the selected row (0 when the list is empty).
@@ -382,6 +423,9 @@ func (m *Model) handleAgentKey(k string) (bool, tea.Cmd) {
 		} else {
 			m.moveAgent(-1)
 		}
+	case "/":
+		m.agentFocus = agentPanelList
+		m.startFilter()
 	case "g", "home":
 		m.moveAgent(-1 << 20)
 	case "G", "end":
@@ -610,6 +654,16 @@ func (m *Model) viewAgentsLeft(w, bodyH int) string {
 	listH := bodyH - actH
 	inner := w - 2
 	avail := listH - 2
+	var filterLine string
+	if m.filtering || m.agentFilter != "" {
+		avail--
+		if m.filtering {
+			m.filterIn.Width = max(1, inner-4)
+			filterLine = " " + m.filterIn.View()
+		} else {
+			filterLine = " " + stBlue.Render("/ ") + stText.Render(m.agentFilter)
+		}
+	}
 
 	rows := m.agentRows()
 	cur := m.agentCursor(rows)
@@ -652,12 +706,18 @@ func (m *Model) viewAgentsLeft(w, bodyH int) string {
 	if len(rows) == 0 {
 		lines = m.agentsEmpty()
 	}
+	if filterLine != "" {
+		lines = append([]string{filterLine}, lines...)
+	}
 	footer := fmt.Sprintf("%d of %d", agentPos, nAgents)
 	list := renderBox(m.agentTabsTitle(w-6), footer, lines, w, listH, m.agentFocus == agentPanelList)
 	return lipgloss.JoinVertical(lipgloss.Left, list, m.viewActivity(w, actH))
 }
 
 func (m *Model) agentsEmpty() []string {
+	if m.agentFilter != "" {
+		return []string{"", " " + stSub.Render("No agents match ") + stText.Render("/"+m.agentFilter) + stSub.Render(".")}
+	}
 	if m.agentCounts()[agentAll] > 0 {
 		return []string{"", " " + stSub.Render(fmt.Sprintf("No %s agents.", strings.ToLower(agentTabNames[m.agentTab])))}
 	}
@@ -793,7 +853,7 @@ func (m *Model) agentBar(last kd) []kd {
 	} else if strings.HasPrefix(m.agentSel, "s:") {
 		keys = append(keys, kd{"enter", "fold"})
 	}
-	return append(keys, kd{"[ ]", "tabs"}, kd{"tab", "panel"}, kd{"a", "tmux"}, kd{"?", "help"}, last)
+	return append(keys, kd{"[ ]", "tabs"}, kd{"/", "filter"}, kd{"f", "find"}, kd{"tab", "panel"}, kd{"a", "tmux"}, kd{"?", "help"}, last)
 }
 
 // clock returns the time; tests replace it.

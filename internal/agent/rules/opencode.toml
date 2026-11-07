@@ -1,0 +1,43 @@
+# lazymux detection rules for opencode (format: see internal/agent/rules.go).
+# Copy to ~/.config/lazymux/agent-detection/opencode.toml to change them.
+id = "opencode"
+version = "2026.11.07.1"
+min_engine_version = 1
+aliases = []
+
+[[rules]]
+id = "permission_prompt"
+state = "blocked"
+priority = 900
+region = "bottom_non_empty_lines(15)"
+visible_blocker = true
+# the selected first option: "› 1. Yes, proceed", "● 1. Yes, allow once"
+line_regex = ['^\s*[│┃|]?\s*[❯›>●▶▸]\s*1[.)]\s+(Yes|Allow|Approve|Proceed)']
+
+[[rules]]
+id = "interrupt_hint"
+state = "working"
+priority = 500
+region = "bottom_non_empty_lines(10)"
+visible_working = true
+any = [
+  { contains = ["esc to interrupt"] },
+  { contains = ["esc to cancel"] },
+  { contains = ["esc interrupt"] },
+  { contains = ["ctrl+c to interrupt"] },
+]
+not = [
+  { contains = ["enter to select"] },
+  { contains = ["enter to confirm"] },
+]
+
+[[rules]]
+id = "permission_panel"
+state = "blocked"
+priority = 890
+region = "bottom_non_empty_lines(12)"
+visible_blocker = true
+any = [
+  { contains = ["allow once"] },
+  { contains = ["permission required"] },
+]

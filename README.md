@@ -45,7 +45,7 @@ Focused (60% of the window):
 | P0 | Panels, live preview, switching | ✅ done |
 | P1 | New / rename / kill + undo / move / swap / break / zoom / layout, dialogs, help | ✅ done |
 | Sidebar | Docked left pane that follows you; compact when unfocused, full UI at 60% when focused | ✅ done |
-| P2 | `/` filter, multi-select + bulk kill / move, jump anywhere (`ctrl+p`) | ✅ done |
+| P2 | `/` filter, multi-select + bulk kill / move, jump anywhere (`f`) | ✅ done |
 | P3 | Agents page (`a`): agents grouped by session under All / Blocked / Working / Done tabs, answer / reply / interrupt, Activity timeline from agent hooks hooks | ✅ done |
 | P4 | Notifications (desktop / terminal / tmux, sounds) on blocked and done, `lazymux status` for the tmux status line, done = unseen | ✅ done |
 | P5 | Project picker (sessionizer), git worktree + agent spawn | planned |
@@ -96,6 +96,8 @@ lazymux hooks status
 lazymux hooks uninstall
 ```
 
+Detection rules are data in [herdr's manifest format](https://github.com/herdrdev/herdr): when an agent's UI changes, put a fixed `~/.config/lazymux/agent-detection/<agent>.toml` in place (`lazymux rules show claude` prints the bundled one, `lazymux rules explain` shows how a pane is read). herdr's manifests work as they are.
+
 ### Status line and notifications
 
 While a sidebar runs, lazymux tells you when an agent needs you (`⣿ claude needs you: api:3 · Bash(go test…)`) or finishes, with a desktop notification and a sound. Put the counts in your tmux status line too:
@@ -130,7 +132,7 @@ You can still run plain `lazymux` in a terminal, full screen: inside tmux `enter
 | `n` | new session / window / pane (depends on panel) |
 | `r` | rename |
 | `d` | kill selection or cursor item (asks first) · `u` undo |
-| `/` · `ctrl+p` | filter the panel · jump anywhere |
+| `/` · `f` | filter the panel (or the agents) · find: jump to any agent, session, window or pane |
 | `space` / `v` | select items / a range |
 | `m` · `s` | move selection to… (picker) · swap selected with cursor |
 | `z` · `b` · `L` | zoom · break pane out · next layout |

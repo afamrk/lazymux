@@ -10,6 +10,23 @@ import (
 	"github.com/afamrk/lazymux/internal/tmux"
 )
 
+// captured from Claude Code 2.1.319 asking with AskUserQuestion
+const claudeQuestion = `❯ can you show me input option with one, two , three
+────────────────────────────────────────────────────────────────
+ ☐ Pick one
+Which option do you pick: One, Two, or Three?
+❯ 1. One
+     The first option.
+  2. Two
+     The second option.
+  3. Three
+     The third option.
+  4. Type something.
+────────────────────────────────────────────────────────────────
+  5. Chat about this
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`
+
 const claudeIdle = `  Summary
 
 ────────────────────────────────────────────────
@@ -45,26 +62,122 @@ func TestClassify(t *testing.T) {
 		name    string
 		kind    Kind
 		screen  string
+		title   string
 		want    State
 		waiting string
-		ok      bool
+		matched bool
 	}{
-		{"claude idle", Claude, claudeIdle, Idle, "", true},
-		{"claude working", Claude, claudeWorking, Working, "", true},
-		{"claude blocked", Claude, claudeBlocked, Blocked, "Bash command: go test ./internal/auth/...", true},
-		{"claude nbsp prompt", Claude, "❯ 1. Yes\n", Blocked, "", true},
-		{"codex working", Codex, "• Explaining\n\n• Working (12s • esc to interrupt)\n▌ \n", Working, "", true},
-		{"codex blocked", Codex, "Would you like to run the following command?\n\n  $ rm -rf build\n\n› 1. Yes, proceed (y)\n  2. Yes, and don't ask again (a)\n  3. No (esc)\n", Blocked, "$ rm -rf build", true},
-		{"gemini working", Gemini, "⠏ Thinking about it (esc to cancel, 4s)\n> \n", Working, "", true},
-		{"gemini blocked", Gemini, "│ Allow execution of: 'ls'?\n│ ● 1. Yes, allow once\n│   2. Yes, allow always\n", Blocked, "", true},
-		{"aider asking", Aider, "Add file to the chat? (Y)es/(N)o/(D)on't ask again [Yes]: ", Blocked, "Add file to the chat? (Y)es/(N)o/(D)on't ask again [Yes]:", true},
-		{"aider prompt", Aider, "Tokens: 2k sent\n\narchitect> ", Idle, "", true},
-		{"aider output", Aider, "Applied edit to main.go\nCommit 1a2b3c", Idle, "", false},
-		{"old prompt high above is ignored", Claude, "❯ 1. Yes\n" + strings.Repeat("line\n", 20), Idle, "", true},
+		{"claude idle", Claude, claudeIdle, "", Idle, "", false},
+		{"claude working", Claude, claudeWorking, "", Working, "", true},
+		{"claude blocked", Claude, claudeBlocked, "", Blocked, "Bash command: go test ./internal/auth/...", true},
+		{"claude nbsp prompt", Claude, "❯ 1. Yes\n", "", Blocked, "", true},
+		{"claude spinning title", Claude, claudeIdle, "⠂ Fix JWT expiry", Working, "", true},
+		{"claude half-circle title", Claude, claudeIdle, "◐ Fix JWT expiry", Working, "", true},
+		{"claude idle title", Claude, claudeIdle, "✳ Fix JWT expiry", Idle, "", true},
+		{"blocked beats a spinning title", Claude, claudeBlocked, "⠂ Fix JWT expiry", Blocked, "Bash command: go test ./internal/auth/...", true},
+		{"claude question form", Claude, claudeQuestion, "✳ Input option", Blocked, "Which option do you pick: One, Two, or Three?", true},
+		{"a menu's esc to cancel is not working", Claude, "Select model\n❯ Opus\n  Sonnet\nEnter to select · Esc to cancel\n", "", Idle, "", false},
+		{"codex working", Codex, "• Explaining\n\n• Working (12s • esc to interrupt)\n▌ \n", "", Working, "", true},
+		{"codex blocked", Codex, "Would you like to run the following command?\n\n  $ rm -rf build\n\n› 1. Yes, proceed (y)\n  2. Yes, and don't ask again (a)\n  3. No (esc)\n", "", Blocked, "$ rm -rf build", true},
+		{"gemini working", Gemini, "⠏ Thinking about it (esc to cancel, 4s)\n> \n", "", Working, "", true},
+		{"gemini blocked", Gemini, "│ Allow execution of: 'ls'?\n│ ● 1. Yes, allow once\n│   2. Yes, allow always\n", "", Blocked, "", true},
+		{"opencode permission panel", Opencode, "△ Permission required\n  $ ls\n  Allow once   Allow always   Reject\n", "", Blocked, "", true},
+		{"aider asking", Aider, "Add file to the chat? (Y)es/(N)o/(D)on't ask again [Yes]: ", "", Blocked, "Add file to the chat? (Y)es/(N)o/(D)on't ask again [Yes]:", true},
+		{"aider prompt", Aider, "Tokens: 2k sent\n\narchitect> ", "", Idle, "", true},
+		{"aider output", Aider, "Applied edit to main.go\nCommit 1a2b3c", "", Idle, "", false},
+		{"old prompt high above is ignored", Claude, "❯ 1. Yes\n" + strings.Repeat("line\n", 20), "", Idle, "", false},
 	} {
-		st, waiting, ok := Classify(tc.kind, tc.screen)
-		if st != tc.want || waiting != tc.waiting || ok != tc.ok {
-			t.Errorf("%s: got (%v, %q, %v), want (%v, %q, %v)", tc.name, st, waiting, ok, tc.want, tc.waiting, tc.ok)
+		d := Classify(tc.kind, tc.screen, tc.title)
+		if d.State != tc.want || d.Waiting != tc.waiting || d.Matched != tc.matched {
+			t.Errorf("%s: got (%v, %q, %v) by %q, want (%v, %q, %v)", tc.name, d.State, d.Waiting, d.Matched, d.Rule, tc.want, tc.waiting, tc.matched)
+		}
+	}
+}
+
+// A herdr manifest (its format, nested any / not gates, its regions) works
+// as an override, and an edit to the file is picked up.
+func TestRuleOverrides(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LAZYMUX_RULES", dir)
+	herdr := `id = "codex"
+version = "2026.10.01.1"
+min_engine_version = 2
+updated_at = "2026-10-01T00:00:00Z"
+aliases = ["openai-codex"]
+
+[[rules]]
+id = "working"
+state = "working"
+priority = 900
+region = "bottom_non_empty_lines(3)"
+visible_working = true
+any = [{ contains = ["thinking"] }, { line_regex = ['^\s*•\s+Working'] }]
+not = [{ contains = ["esc to cancel"] }]
+
+[[rules]]
+id = "approval"
+state = "blocked"
+priority = 950
+region = "after_last_horizontal_rule"
+contains = ["allow command?"]
+`
+	write := func(s string) {
+		if err := os.WriteFile(filepath.Join(dir, "codex.toml"), []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(herdr)
+	if m, warn := ManifestFor(Codex); warn != "" || m.Source == "bundled" || len(m.Rules) != 2 {
+		t.Fatalf("override not used: %v %q", m.Source, warn)
+	}
+	for _, tc := range []struct {
+		screen string
+		want   State
+		rule   string
+	}{
+		{"• Working (3s)\n", Working, "working"},
+		{"Thinking… esc to cancel\n", Idle, ""},
+		{"Allow command?\n────\nnothing here\n", Idle, ""},
+		{"old\n────\nAllow command? rm\n• Working\n", Blocked, "approval"},
+	} {
+		if d := Classify(Codex, tc.screen, ""); d.State != tc.want || d.Rule != tc.rule {
+			t.Errorf("%q: got %v by %q, want %v by %q", tc.screen, d.State, d.Rule, tc.want, tc.rule)
+		}
+	}
+
+	// a broken override is ignored with a warning, the bundled rules stay
+	write(herdr + "\n[[rules]]\nid = \"bad\"\nstate = \"working\"\nregex = ['(']\n")
+	time.Sleep(10 * time.Millisecond)
+	if m, warn := ManifestFor(Codex); m.Source != "bundled" || !strings.Contains(warn, "bad") {
+		t.Errorf("broken override: source %v, warn %q", m.Source, warn)
+	}
+	// unknown keys are an error, like in herdr
+	if _, err := ParseManifest([]byte("id = \"x\"\ncolour = 1\n")); err == nil {
+		t.Error("unknown key accepted")
+	}
+	// agy finds herdr's file name for it
+	if err := os.WriteFile(filepath.Join(dir, "antigravity.toml"), []byte("id = \"agy\"\naliases = [\"antigravity\"]\n[[rules]]\nid = \"w\"\nstate = \"working\"\ncontains = [\"busy\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if d := Classify(Agy, "busy\n", ""); d.State != Working {
+		t.Errorf("agy override (antigravity.toml) not used: %+v", d)
+	}
+}
+
+func TestRegions(t *testing.T) {
+	screen := "a\n\nb\n────────\n❯ typed\n────────\nfooter\n\n"
+	in := Input{Screen: screen, Title: "⠂ x"}
+	for spec, want := range map[string]string{
+		"osc_title":                       "⠂ x",
+		"bottom_non_empty_lines(1)":       "footer\n\n",
+		"bottom_lines(2)":                 "\n",
+		"top_non_empty_lines(2)":          "a\n\nb",
+		"after_last_horizontal_rule":      "footer\n\n",
+		"prompt_box_body":                 "❯ typed",
+		"last_non_empty_above_prompt_box": "b",
+	} {
+		if got := region(in, spec); got != want {
+			t.Errorf("%s = %q, want %q", spec, got, want)
 		}
 	}
 }
@@ -323,4 +436,29 @@ func row(id, cmd, title string) string {
 	f := []string{"$0", "work", "0", "@" + id[1:], id[1:], "w" + id[1:], "1", "lay",
 		id, "0", "1", cmd, "/src", "100", "80", "24", "0", "0", "", title}
 	return strings.Join(f, "\t")
+}
+
+func TestGoRegex(t *testing.T) {
+	for in, want := range map[string]string{
+		`^[\u2800-\u28FF]`:      `^[\x{2800}-\x{28FF}]`,
+		`^⚠[\u{fe0e}\u{fe0f}]?`: `^⚠[\x{fe0e}\x{fe0f}]?`,
+		`\p{Alphabetic}+ing`:    `\p{L}+ing`,
+		`a\\u2800 \d\s`:         `a\\u2800 \d\s`, // an escaped backslash stays
+	} {
+		if got := goRegex(in); got != want {
+			t.Errorf("goRegex(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestBundledRules(t *testing.T) {
+	for _, k := range Kinds {
+		m := bundledManifest(k)
+		if len(m.Rules) == 0 || !m.matches(k) {
+			t.Errorf("%s: no bundled rules", k)
+		}
+		if BundledRules(k) == "" {
+			t.Errorf("%s: no bundled file", k)
+		}
+	}
 }

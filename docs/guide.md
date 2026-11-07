@@ -169,7 +169,7 @@ Undo keeps the last 20 kills, most recent first, but only while lazymux is runni
 - While typing, `↑` / `↓` move through the matches. `enter` keeps the filter and gives the keys back (`j`, `space`, `d`… work on the filtered list); `esc` clears it.
 - Each panel keeps its own filter until you clear it with `esc`.
 
-**`ctrl+p` (jump anywhere)** opens one fuzzy list of every session (`SESS`), window (`WIN`) and pane (`PANE`, only for windows with several panes), with the command and directory on the right. Type a few letters, e.g. `apicl` for `api:3 claude`.
+**`f` (find, also `ctrl+p`)** opens one fuzzy list of every agent (`AGENT`, with its state and what it waits for or works on), session (`SESS`), window (`WIN`) and pane (`PANE`, only for windows with several panes), with the command and directory on the right. Agents come first on the Agents page (blocked first) and last on the tmux page. `enter` goes there; `tab` only selects it (an agent on the Agents page). Type a few letters, e.g. `apicl` for `api:3 claude`.
 
 - `enter` goes there (switches, like `enter` in the panels).
 - `tab` only selects it in the panels, so you can act on it (kill, move…) without switching.
@@ -212,13 +212,36 @@ lazymux finds AI coding agents in every pane: **Claude Code, Codex, agy (Antigra
 | state | glyph | seen as |
 | --- | --- | --- |
 | **blocked** | `⣿` red | a permission prompt with a selected first option (`❯ 1. Yes`, `› 1. Yes, proceed`, `● 1. Allow once`); aider's `(Y)es/(N)o` question |
-| **working** | `⣾` yellow | `esc to interrupt` / `esc to cancel` in the status line, or Claude Code's spinner line (`✽ Thinking… (12s · ↓ 1k tokens)`); for aider, a screen that changed in the last 3 seconds |
+| **working** | `⣾` yellow | `esc to interrupt` / `esc to cancel` in the status line (not in a menu that says `enter to select`), Claude Code's spinner line (`✽ Thinking… (12s · ↓ 1k tokens)`) or its spinning terminal title (`⠂ Fix JWT expiry`); for aider, a screen that changed in the last 3 seconds |
 | **done** | `●` green | neither (waiting for a prompt), and it finished while you were not looking at its window |
 | **idle** | `○` dim | waiting for a prompt, and you have seen it: its window was on screen, or you selected it on the Agents page |
 
 **Done or idle** works like herdr: an agent that finishes in the window you are looking at becomes idle right away; one that finishes elsewhere stays done until you go to its window (or select it on the Agents page), so `●` always means "finished, not checked yet". The Done tab lists both.
 
 The time next to the state (`blocked 2m`) is how long it has been in that state. Only the bottom of the screen counts, so the same words inside the conversation do not fool it.
+
+**Detection rules.** What each screen shape means is data, not code: every agent has a rules file in [herdr's agent-detection manifest format](https://github.com/herdrdev/herdr/tree/main/src/detect/manifests). When an agent changes its UI and lazymux misreads it, fix the rules without waiting for a new lazymux:
+
+```sh
+lazymux rules                       # each agent's rules: bundled or your file
+lazymux rules explain %12           # how the rules read pane %12 (default: this pane)
+mkdir -p ~/.config/lazymux/agent-detection
+lazymux rules show claude > ~/.config/lazymux/agent-detection/claude.toml   # then edit it
+```
+
+A file `~/.config/lazymux/agent-detection/<agent>.toml` (`$LAZYMUX_RULES` changes the directory) replaces the bundled rules of that agent and is reread when it changes. herdr's own manifests work as they are: copy `claude.toml`, `codex.toml`, `opencode.toml` or `antigravity.toml` (agy) from herdr. A file that does not parse is ignored, and `lazymux rules` says why.
+
+```toml
+[[rules]]
+id = "interrupt_hint"
+state = "working"                     # idle | working | blocked | unknown
+priority = 500                        # the matching rule with the highest priority wins
+region = "bottom_non_empty_lines(10)" # where to look; osc_title is the pane title
+any = [{ contains = ["esc to interrupt"] }, { contains = ["esc to cancel"] }]
+not = [{ contains = ["enter to select"] }]  # a menu waits for you
+```
+
+A rule matches when all of its conditions hold: `contains` (every text, case-insensitive), `regex` (every pattern on the region), `line_regex` (every pattern on some line), `all` / `any` / `not` (nested conditions). Regions: `whole_recent`, `bottom_non_empty_lines(N)`, `bottom_lines(N)`, `top_non_empty_lines(N)`, `after_last_horizontal_rule`, `prompt_box_body`, `above_prompt_box`, `last_non_empty_above_prompt_box`, `osc_title`, and herdr's Codex prompt regions. `state = "unknown"` or `skip_state_update = true` keeps the last state (for overlays such as Claude's transcript view). When no rule matches the agent is idle (aider: working while its screen changes).
 
 **The page** (`a`):
 
@@ -242,6 +265,7 @@ The time next to the state (`blocked 2m`) is how long it has been in that state.
 ```
 
 - **[1]** lists agents grouped by session, sessions with a blocked agent first. Each agent has two lines: glyph, program and window, state and time; then a dim summary (the last prompt, or the title Claude Code gives its terminal) and, when blocked, what it waits for. An agent without a summary shows its directory.
+- **Filter** `/`: type to narrow the list; it matches the program, session, window, state, summary, waiting reason and directory (`/go test` finds the agent waiting on `go test`). Folded sessions open while filtering. `enter` keeps the filter, `esc` clears it.
 - **Tabs** `[` / `]`: **All**, **Blocked**, **Working**, **Done**, each with a live count. The unfocused sidebar shows the totals in its header (`⣿1 ⣾2 ●1`).
 - **Session headers** carry the worst state in the session. `enter` (or `space`) on a header folds or unfolds it.
 - **[2] Activity** is the timeline of the selected agent: prompts, tool calls (`Read`, `Edit`, `Bash`…) and `done` when a turn ends. The tool call a blocked agent waits on is tinted red and marked `pending`. It needs hooks (below); `j` / `k` scroll it when it is focused.
@@ -339,4 +363,5 @@ It reads the summary the notifying lazymux writes every second (`~/.cache/lazymu
 | `lazymux hooks install \| uninstall \| status [agent…]` | add / remove lazymux in the hooks of Claude Code, Codex, agy, opencode |
 | `lazymux hook <agent> <event>` | record one hook event from stdin (run by the hooks) |
 | `lazymux status [--plain]` | agent counts for tmux's `status-right` |
+| `lazymux rules [explain [pane] \| show <agent>]` | detection rules per agent; how they read a pane; print the bundled rules |
 | `lazymux notify test` | send a sample notification with the current settings |

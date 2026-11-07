@@ -26,7 +26,11 @@ func newFilterInput() textinput.Model {
 
 func (m *Model) startFilter() {
 	m.filterIn = newFilterInput()
-	m.filterIn.SetValue(m.filter[m.focus])
+	if m.page == pageAgents {
+		m.filterIn.SetValue(m.agentFilter)
+	} else {
+		m.filterIn.SetValue(m.filter[m.focus])
+	}
 	m.filterIn.CursorEnd()
 	m.filterIn.Focus()
 	m.filtering = true
@@ -34,6 +38,9 @@ func (m *Model) startFilter() {
 
 // handleFilterKey handles a key while the filter input is active.
 func (m *Model) handleFilterKey(k tea.KeyMsg) tea.Cmd {
+	if m.page == pageAgents {
+		return m.handleAgentFilterKey(k)
+	}
 	switch k.String() {
 	case "enter":
 		m.filtering = false

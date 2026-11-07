@@ -1,0 +1,25 @@
+# lazymux detection rules for aider (format: see internal/agent/rules.go).
+# Copy to ~/.config/lazymux/agent-detection/aider.toml to change them.
+# aider shows no working indicator: when no rule matches, a screen that
+# changed in the last 3 seconds counts as working.
+id = "aider"
+version = "2026.11.07.1"
+min_engine_version = 1
+
+[[rules]]
+id = "confirm_question"
+state = "blocked"
+priority = 900
+region = "bottom_non_empty_lines(1)"
+visible_blocker = true
+# "Add file to the chat? (Y)es/(N)o/(D)on't ask again [Yes]:"
+regex = ['\(Y\)es/\(N\)o']
+
+[[rules]]
+id = "input_prompt"
+state = "idle"
+priority = 500
+region = "bottom_non_empty_lines(1)"
+visible_idle = true
+# "> " or "architect> "
+line_regex = ['^\s*[\w-]*> ?$']

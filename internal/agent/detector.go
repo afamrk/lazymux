@@ -99,9 +99,13 @@ func (d *Detector) Detect(t *tmux.Tree) map[string]*Agent {
 			tr.screen, tr.changed = screen, now
 		}
 
-		st, waiting, ok := Classify(f.kind, screen)
-		if !ok {
-			st = Idle
+		det := Classify(f.kind, screen, f.pane.Title)
+		st, waiting := det.State, det.Waiting
+		switch {
+		case det.Keep && !fresh:
+			st, waiting = tr.a.State, tr.a.Waiting // e.g. a transcript view hides the live screen
+		case !det.Matched && f.kind == Aider:
+			// aider shows no working indicator: a changing screen is working
 			if !fresh && now.Sub(tr.changed) < changeWindow {
 				st = Working
 			}

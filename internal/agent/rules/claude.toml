@@ -1,0 +1,87 @@
+# lazymux detection rules for Claude Code (format: see internal/agent/rules.go).
+# Copy to ~/.config/lazymux/agent-detection/claude.toml to change them.
+id = "claude"
+version = "2026.11.07.1"
+min_engine_version = 1
+aliases = ["claude-code"]
+
+[[rules]]
+id = "permission_prompt"
+state = "blocked"
+priority = 900
+region = "bottom_non_empty_lines(15)"
+visible_blocker = true
+# the selected first option of a permission prompt: "❯ 1. Yes"
+line_regex = ['^\s*[│┃|]?\s*[❯›>●▶▸]\s*1[.)]\s+(Yes|Allow|Approve|Proceed)']
+
+[[rules]]
+id = "question_form"
+state = "blocked"
+priority = 880
+region = "after_last_horizontal_rule"
+visible_blocker = true
+# a question (AskUserQuestion) or another form waiting for an answer:
+# "Enter to select · ↑/↓ to navigate · Esc to cancel"
+contains = ["esc to cancel"]
+any = [
+  { contains = ["enter to confirm"] },
+  { contains = ["enter to select"], any = [
+    { contains = ["to navigate"] },
+    { contains = ["arrow keys"] },
+  ] },
+]
+
+[[rules]]
+id = "title_spinner"
+state = "working"
+priority = 600
+region = "osc_title"
+visible_working = true
+# Claude Code animates its terminal title while a turn runs: braille dots
+# (up to 2.1.227) or half circles (2.1.228+). An idle title starts with ✳.
+regex = ['^[\x{2800}-\x{28FF}\x{25D0}-\x{25D3}] ']
+
+[[rules]]
+id = "spinner_line"
+state = "working"
+priority = 500
+region = "bottom_non_empty_lines(10)"
+visible_working = true
+# "✽ Philosophizing… (1m 29s · ↓ 5.6k tokens)"
+line_regex = ['^\s*[·✢✳✶✻✽*⏺]\s+\S+…\s*\(']
+
+[[rules]]
+id = "interrupt_hint"
+state = "working"
+priority = 500
+region = "bottom_non_empty_lines(10)"
+visible_working = true
+any = [
+  { contains = ["esc to interrupt"] },
+  { contains = ["esc to cancel"] },
+  { contains = ["ctrl+c to interrupt"] },
+]
+# menus and forms (model picker, questions) say "esc to cancel" too, but
+# they wait for you
+not = [
+  { contains = ["enter to select"] },
+  { contains = ["enter to confirm"] },
+  { contains = ["enter to set as default"] },
+]
+
+[[rules]]
+id = "transcript_viewer"
+state = "unknown"
+priority = 1000
+region = "bottom_non_empty_lines(3)"
+skip_state_update = true
+# the ctrl+o transcript hides the live screen: keep the last state
+contains = ["showing detailed transcript"]
+
+[[rules]]
+id = "title_idle"
+state = "idle"
+priority = 100
+region = "osc_title"
+visible_idle = true
+regex = ['^\x{2733} ']

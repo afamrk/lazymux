@@ -24,6 +24,7 @@ type pickItem struct {
 	sess   string // target ids
 	win    string
 	pane   string
+	agent  bool // an agent row of jump anywhere (pane is its pane)
 }
 
 type pickHit struct {
@@ -33,7 +34,7 @@ type pickHit struct {
 }
 
 // pickerModal is a fuzzy list in a dialog: the move target picker (m) and
-// jump anywhere (ctrl+p).
+// jump anywhere (f).
 type pickerModal struct {
 	title  string
 	color  lipgloss.Color
@@ -157,7 +158,7 @@ func (p *pickerModal) view(maxW, maxH int) string {
 	return renderFrame(title, ansi.Truncate(footer, w-4, "…"), true, lines, w, len(lines)+2, p.color)
 }
 
-// --- jump anywhere (ctrl+p) ------------------------------------------------
+// --- jump anywhere (f) ------------------------------------------------
 
 var (
 	stKindSess = stGreen.Bold(true)
@@ -173,8 +174,42 @@ func tildePath(p string) string {
 	return p
 }
 
-// jumpItems lists every session, window and pane.
+// agentJumpItems lists every agent, the most urgent first.
+func (m *Model) agentJumpItems() []pickItem {
+	var items []pickItem
+	for _, s := range m.sessions() {
+		as, ps := m.sessionAgents(s)
+		for i, a := range as {
+			p := ps[i]
+			detail := agentGlyph(a) + " " + a.Label()
+			switch {
+			case a.Waiting != "":
+				detail += " · " + a.Waiting
+			case a.Summary != "":
+				detail += " · " + a.Summary
+			}
+			items = append(items, pickItem{kind: "AGENT", kindSt: agentStyle(a).Bold(true),
+				text:   fmt.Sprintf("%s %s:%d %s", a.Kind, s.Name, p.Window.Index, p.Window.Name),
+				detail: ansi.Truncate(detail, 40, "…"), sess: s.ID, win: p.Window.ID, pane: p.ID, agent: true})
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return urgency(m.agents[items[i].pane]) > urgency(m.agents[items[j].pane])
+	})
+	return items
+}
+
+// jumpItems lists every session, window and pane, and every agent (first
+// on the Agents page, last on the tmux page).
 func (m *Model) jumpItems() []pickItem {
+	agents := m.agentJumpItems()
+	if m.page == pageAgents {
+		return append(agents, m.placeItems()...)
+	}
+	return append(m.placeItems(), agents...)
+}
+
+func (m *Model) placeItems() []pickItem {
 	var items []pickItem
 	for _, s := range m.sessions() {
 		detail := fmt.Sprintf("%d windows", len(s.Windows))
@@ -203,11 +238,22 @@ func (m *Model) jumpItems() []pickItem {
 	return items
 }
 
-// openJump opens the ctrl+p palette. enter selects the item and switches to
-// it; tab only selects it in the panels.
+// openJump opens the jump anywhere palette (f). enter selects the item and
+// switches to it; tab only selects it: agents on the Agents page, the rest
+// in the tmux panels.
 func (m *Model) openJump() {
-	m.page = pageTmux
+	selectAgent := func(it pickItem) {
+		m.page = pageAgents
+		m.agentTab, m.agentFilter, m.agentSel = agentAll, "", it.pane
+		delete(m.collapsed, it.sess)
+		m.normalizeAgents()
+	}
 	selectIt := func(it pickItem) {
+		if it.agent {
+			selectAgent(it)
+			return
+		}
+		m.page = pageTmux
 		m.filter = [numPanels]string{}
 		m.selSess, m.selWin, m.selPane = it.sess, it.win, it.pane
 		switch {
@@ -222,6 +268,9 @@ func (m *Model) openJump() {
 	}
 	p := newPicker("Jump to", cMauve, "go", m.jumpItems(), func(it pickItem) tea.Cmd {
 		selectIt(it)
+		if it.agent {
+			return tea.Batch(m.jumpToAgent(), m.fetchPreview())
+		}
 		return tea.Batch(m.switchCmd(), m.fetchPreview())
 	})
 	p.onTab = func(it pickItem) tea.Cmd {

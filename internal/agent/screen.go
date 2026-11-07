@@ -5,34 +5,41 @@ import (
 	"strings"
 )
 
-// Screen scraping: the visible pane text tells whether an agent is working
-// (a spinner / "esc to interrupt" line near the bottom) or blocked (a
-// permission prompt with numbered options). Only the bottom of the screen is
-// looked at, so the same words inside the conversation do not count.
+// Screen scraping: the visible pane text (and the terminal title) tells
+// whether an agent is working, blocked or idle. What each shape means lives
+// in the agent's detection rules (rules.go, rules/*.toml); this file
+// prepares the screen and reads what a blocked agent waits for.
 
 var (
 	// a selected first option: "❯ 1. Yes", "› 1. Yes, proceed", "● 1. Allow once"
 	reFirstOption = regexp.MustCompile(`^\s*[│┃|]?\s*[❯›>●▶▸]\s*1[.)]\s+(Yes|Allow|Approve|Proceed)`)
+	// a selected first option of any kind: "❯ 1. One"
+	reSelectedFirst = regexp.MustCompile(`^\s*[│┃|]?\s*[❯›>●▶▸]\s*1[.)]\s+\S`)
 	// any numbered option line, for finding where a prompt box starts
 	reOption = regexp.MustCompile(`^\s*[│┃|]?\s*[❯›>●▶▸]?\s*\d[.)]\s+\S`)
-	// Claude Code's status line while it works: "✽ Philosophizing… (1m 29s · ↓ 5.6k tokens)"
-	reClaudeSpinner = regexp.MustCompile(`^\s*[·✢✳✶✻✽*⏺]\s+\S+…\s*\(`)
 	// aider asks with "(Y)es/(N)o"
-	reAiderAsk = regexp.MustCompile(`\(Y\)es/\(N\)o`)
-	// aider's input prompt: "> " or "architect> "
-	reAiderPrompt = regexp.MustCompile(`^[\w-]*> ?$`)
-	reToolHeader  = regexp.MustCompile(`^(Bash command|(Edit|Create|Read|Write|Delete) file|Fetch|Web ?Fetch|Web search|Tool use|MCP tool)\b.{0,20}$`)
-	reBoxOnly     = regexp.MustCompile(`^[\s─━│┃╭╮╰╯┌┐└┘├┤═║╔╗╚╝-]*$`)
+	reAiderAsk   = regexp.MustCompile(`\(Y\)es/\(N\)o`)
+	reToolHeader = regexp.MustCompile(`^(Bash command|(Edit|Create|Read|Write|Delete) file|Fetch|Web ?Fetch|Web search|Tool use|MCP tool)\b.{0,20}$`)
+	reBoxOnly    = regexp.MustCompile(`^[\s─━│┃╭╮╰╯┌┐└┘├┤═║╔╗╚╝-]*$`)
 )
+
+// normalize turns non-breaking spaces (Claude's prompt uses them) into
+// spaces and trims each line's right end.
+func normalize(screen string) string {
+	lines := strings.Split(strings.ReplaceAll(screen, "\u00a0", " "), "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimRight(l, " \t")
+	}
+	return strings.Join(lines, "\n")
+}
 
 // bottom returns the last n non-blank lines of the screen, right-trimmed.
 func bottom(screen string, n int) []string {
-	all := strings.Split(screen, "\n")
+	all := strings.Split(normalize(screen), "\n")
 	var out []string
 	for i := len(all) - 1; i >= 0 && len(out) < n; i-- {
-		l := strings.TrimRight(strings.ReplaceAll(all[i], "\u00a0", " "), " \t")
-		if strings.TrimSpace(l) != "" {
-			out = append(out, l)
+		if strings.TrimSpace(all[i]) != "" {
+			out = append(out, all[i])
 		}
 	}
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
@@ -41,58 +48,57 @@ func bottom(screen string, n int) []string {
 	return out
 }
 
-// Classify reads an agent's state from its screen. ok is false when the
-// screen shows neither a prompt nor a working indicator; the caller then
-// decides (idle, or working if the screen keeps changing for agents without
-// a working indicator).
-func Classify(k Kind, screen string) (st State, waiting string, ok bool) {
-	lines := bottom(screen, 30)
-	if k == Aider {
-		if len(lines) > 0 {
-			last := lines[len(lines)-1]
-			if reAiderAsk.MatchString(last) {
-				return Blocked, strings.TrimSpace(last), true
-			}
-			if reAiderPrompt.MatchString(strings.TrimSpace(last)) {
-				return Idle, "", true
-			}
-		}
-		return Idle, "", false
-	}
-
-	// blocked: a selected "1. Yes / Allow" option near the bottom
-	for i := len(lines) - 1; i >= 0 && i >= len(lines)-15; i-- {
-		if reFirstOption.MatchString(lines[i]) {
-			return Blocked, promptReason(lines[:i]), true
-		}
-	}
-	if k == Opencode {
-		for _, l := range tail(lines, 12) {
-			if strings.Contains(l, "Allow once") || strings.Contains(l, "Permission required") {
-				return Blocked, "", true
-			}
-		}
-	}
-
-	// working: an interrupt hint or Claude's spinner line near the bottom
-	for _, l := range tail(lines, 10) {
-		low := strings.ToLower(l)
-		if strings.Contains(low, "esc to interrupt") || strings.Contains(low, "esc to cancel") ||
-			strings.Contains(low, "esc interrupt") || strings.Contains(low, "ctrl+c to interrupt") {
-			return Working, "", true
-		}
-		if k == Claude && reClaudeSpinner.MatchString(l) {
-			return Working, "", true
-		}
-	}
-	return Idle, "", true
+// Detection is what the rules read from a pane.
+type Detection struct {
+	State   State
+	Waiting string // blocked: what the prompt is about
+	Rule    string // the matched rule; "" when none matched
+	Matched bool   // false: no rule matched (the caller decides: idle, or working for a changing screen)
+	Keep    bool   // the rule says: keep the previous state
 }
 
-func tail(lines []string, n int) []string {
-	if len(lines) > n {
-		return lines[len(lines)-n:]
+// Classify reads an agent's state from its screen and terminal title with
+// the agent's detection rules.
+func Classify(k Kind, screen, title string) Detection {
+	m, _ := ManifestFor(k)
+	v, _ := m.Evaluate(Input{Screen: normalize(screen), Title: title}, false)
+	d := Detection{State: v.State, Rule: v.Rule, Matched: v.Matched, Keep: v.Keep}
+	if d.State == Blocked && !d.Keep {
+		d.Waiting = waitingReason(k, screen)
 	}
-	return lines
+	return d
+}
+
+// waitingReason reads what a permission prompt asks about: the lines above
+// its selected first option, or aider's question.
+func waitingReason(k Kind, screen string) string {
+	lines := bottom(screen, 30)
+	if k == Aider {
+		for i := len(lines) - 1; i >= 0; i-- {
+			if reAiderAsk.MatchString(lines[i]) {
+				return strings.TrimSpace(lines[i])
+			}
+		}
+		return ""
+	}
+	for i := len(lines) - 1; i >= 0 && i >= len(lines)-15; i-- {
+		if reFirstOption.MatchString(lines[i]) {
+			return promptReason(lines[:i])
+		}
+	}
+	// a question form: the question above its options
+	for i := len(lines) - 1; i >= 0; i-- {
+		if !reSelectedFirst.MatchString(lines[i]) {
+			continue
+		}
+		for j := i - 1; j >= 0 && j >= i-4; j-- {
+			if q := strings.TrimSpace(strings.Trim(strings.TrimSpace(lines[j]), "│┃|")); strings.HasSuffix(q, "?") {
+				return q
+			}
+		}
+		return ""
+	}
+	return ""
 }
 
 // promptReason guesses what a permission prompt is about from the lines

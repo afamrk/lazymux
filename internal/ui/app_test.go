@@ -417,7 +417,7 @@ func TestAgentsPageListsGroupedAgents(t *testing.T) {
 		"▾ work", "⣾ codex 1:w", "working 40s",
 		"[2] Activity (claude@api:2)", "▸ prompt  fix jwt expiry", "⣿ Bash    go test ./...  pending",
 		"api:2.%1 · claude ", "⣿ blocked 2m ─╮",
-		"1 yes · 2 always · 3 no · i reply · x interrupt  │ enter jump · [ ] tabs · tab panel · a tmux",
+		"1 yes · 2 always · 3 no · i reply · x interrupt  │ enter jump · [ ] tabs · / filter · f find · tab panel · a tmux",
 	} {
 		if !strings.Contains(v, want) {
 			t.Errorf("agents page missing %q:\n%s", want, v)
@@ -540,5 +540,63 @@ func TestDoneAgentBecomesIdleWhenSelected(t *testing.T) {
 	}
 	if v := ansi.Strip(m.View()); !strings.Contains(v, "○ codex") || !strings.Contains(v, "idle") {
 		t.Errorf("seen agent should show as ○ idle:\n%s", v)
+	}
+}
+
+func TestAgentFilter(t *testing.T) {
+	m := agentModel(t)
+	m.Update(key("a"))
+	m.Update(key("/"))
+	m.Update(key("codex"))
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "codex 1:w") || strings.Contains(v, "claude 2:claude") {
+		t.Errorf("filter codex should show only codex:\n%s", v)
+	}
+	if a, _ := m.curAgent(); a == nil || a.Pane != "%4" {
+		t.Errorf("selection should move to the match, got %v", a)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // keep it
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "/ codex") {
+		t.Errorf("kept filter not shown:\n%s", v)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // clear it, stay on the page
+	if m.agentFilter != "" || m.page != pageAgents {
+		t.Errorf("esc should clear the filter: %q page %v", m.agentFilter, m.page)
+	}
+	m.Update(key("/"))
+	m.Update(key("go test")) // the waiting reason matches too
+	if a, _ := m.curAgent(); a == nil || a.Pane != "%1" {
+		t.Errorf("waiting reason should match claude, got %v", a)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m.Update(key("/"))
+	m.Update(key("zzz"))
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "No agents match /zzz.") {
+		t.Errorf("no-match message missing:\n%s", v)
+	}
+}
+
+func TestFindListsAgents(t *testing.T) {
+	m := agentModel(t)
+	m.Update(key("f"))
+	p, ok := m.modal.(*pickerModal)
+	if !ok {
+		t.Fatalf("f should open jump anywhere, modal = %T", m.modal)
+	}
+	if !p.items[len(p.items)-1].agent {
+		t.Error("on the tmux page agents come after sessions / windows / panes")
+	}
+	m.Update(key("codex"))
+	if len(p.hits) == 0 || !p.hits[0].item.agent || p.hits[0].item.pane != "%4" {
+		t.Fatalf("first hit = %+v", p.hits)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if m.modal != nil || m.page != pageAgents || m.agentSel != "%4" {
+		t.Errorf("tab on an agent should select it on the Agents page: page %v sel %q", m.page, m.agentSel)
+	}
+	m.Update(key("f")) // on the Agents page agents come first, blocked first
+	p = m.modal.(*pickerModal)
+	if !p.items[0].agent || p.items[0].pane != "%1" {
+		t.Errorf("first item = %+v", p.items[0])
 	}
 }

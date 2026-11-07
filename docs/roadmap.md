@@ -14,7 +14,8 @@ New session / window / pane (with an fzf directory picker), rename, kill with a 
 ### ✅ P2: filter and multi-select
 - `/` fuzzy filter in each panel with highlighted matches; `enter` keeps it, `esc` clears it
 - `space` selects several items, `v` a range; bulk kill (one undo step), move windows / join panes through a fuzzy target picker, `s` swaps the one selected item with the cursor (replaces the P1 "mark a target" flow)
-- `ctrl+p`: one fuzzy search over every session, window and pane; `enter` goes there, `tab` only selects
+- `f` (or `ctrl+p`): one fuzzy search over every agent, session, window and pane; `enter` goes there, `tab` only selects
+- `/` filter on the Agents page
 
 ### ✅ P3: Agents page
 - detection with no setup for Claude Code, Codex, agy, opencode and aider (and Gemini CLI): the pane's command or process tree gives the agent, the bottom of its screen the state (blocked / working / idle-done)
@@ -29,6 +30,12 @@ New session / window / pane (with an fzf directory picker), rename, kill with a 
 - one notifier per server, picked with a lock file; it also writes the status summary
 - done means unseen: `● done` until you look at the window or select the agent, then `○ idle`
 - settings as tmux options (`@lazymux-notify`, `-notify-on`, `-notify-delay`, `-sound`, `-sound-blocked`, `-sound-done`)
+
+### ✅ Detection rules as data (from herdr)
+- each agent's detection rules are a TOML manifest in herdr's format, bundled and replaceable in `~/.config/lazymux/agent-detection/`; herdr's own manifests work unchanged
+- `not` conditions (an `esc to cancel` menu is not working), regions, priorities, a rule that keeps the last state
+- Claude Code's spinning terminal title counts as working
+- `lazymux rules`, `lazymux rules explain <pane>`, `lazymux rules show <agent>`
 
 ### P5: projects and worktrees
 - `N`: fuzzy project picker (zoxide → fd → configured roots), creates or attaches a session named after the directory

@@ -20,7 +20,7 @@ var bindings = []binding{
 	{"h / l, tab", "previous / next panel", "Navigation", 0, "", false},
 	{"1 2 3", "jump to panel", "Navigation", 0, "", false},
 	{"/", "filter the list (enter keep · esc clear)", "Navigation", 0, "/", false},
-	{"ctrl+p", "jump anywhere (fuzzy)", "Navigation", 0, "ctrl+p", false},
+	{"f", "find: jump anywhere, agents too (also ctrl+p)", "Navigation", 0, "f", false},
 
 	{"enter", "switch to selection", "Sessions & windows", 0, "enter", false},
 	{"n", "new (session / window / pane)", "Sessions & windows", 0, "n", false},
@@ -34,6 +34,7 @@ var bindings = []binding{
 	{"L", "cycle layout", "Sessions & windows", 0, "L", false},
 
 	{"[ / ]", "state tab (All / Blocked / Working / Done)", "Agents", 1, "", false},
+	{"/", "filter agents (program, session, prompt…)", "Agents", 1, "", false},
 	{"enter", "jump to agent · fold session header", "Agents", 1, "", false},
 	{"1 / 2 / 3", "answer permission (yes / always / no)", "Agents", 1, "", false},
 	{"i", "reply to agent (types a line)", "Agents", 1, "", false},

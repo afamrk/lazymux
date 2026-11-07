@@ -75,9 +75,10 @@ type Model struct {
 	toastSeq int
 	undo     [][]*tmux.Snapshot // undo steps (one per kill, possibly several items), most recent last
 
-	filter    [numPanels]string // per-panel filter (/)
-	filtering bool              // the filter input of the focused panel has the keys
-	filterIn  textinput.Model
+	filter      [numPanels]string // per-panel filter (/)
+	filtering   bool              // the filter input of the focused panel has the keys
+	filterIn    textinput.Model
+	agentFilter string // Agents page filter (/)
 
 	selected []selRef // multi-selection (space / v), all in one panel
 	anchor   string   // id of the last item toggled with space (start of a v range)
@@ -400,6 +401,11 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 	}
+	if k.String() == "esc" && m.page == pageAgents && m.agentFilter != "" {
+		m.agentFilter = ""
+		m.normalizeAgents()
+		return m, m.fetchPreview()
+	}
 	if k.String() == "esc" && m.page == pageTmux { // esc clears selection, then filter
 		if len(m.selected) > 0 {
 			m.selected = nil
@@ -423,7 +429,7 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.togglePage()
 	case "q", "ctrl+c", "esc":
 		return m, tea.Quit
-	case "ctrl+p":
+	case "f", "ctrl+p":
 		m.openJump()
 		return m, nil
 	case "?":
@@ -851,7 +857,7 @@ func (m *Model) viewBar() string {
 	}
 	switch m.focus {
 	case panelSessions:
-		keys = append(keys, kd{"/", "filter"}, kd{"space", "select"}, kd{"ctrl+p", "jump"})
+		keys = append(keys, kd{"/", "filter"}, kd{"f", "find"}, kd{"space", "select"})
 	case panelWindows:
 		keys = append(keys, kd{"m", "move"}, kd{"/", "filter"}, kd{"space", "select"}, kd{"L", "layout"})
 	case panelPanes:

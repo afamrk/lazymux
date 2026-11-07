@@ -44,6 +44,9 @@ func main() {
 		case "hooks":
 			hooks(args[1:])
 			return
+		case "rules":
+			rules(c, args[1:])
+			return
 		case "status": // for tmux's status-right: #(lazymux status)
 			plain := len(args) > 1 && args[1] == "--plain"
 			fmt.Println(agent.FormatStatus(agent.CurrentStatus(c), !plain))
@@ -98,6 +101,53 @@ func sidebar(c *tmux.Client, args []string) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "lazymux:", err)
 		os.Exit(1)
+	}
+}
+
+// rules handles `lazymux rules [explain [pane] | show <agent>]`: the
+// detection rules of each agent, where an override goes, and how the rules
+// read a pane.
+func rules(c *tmux.Client, args []string) {
+	usage := "usage: lazymux rules [explain [pane-id] | show <agent>]"
+	switch {
+	case len(args) == 0:
+		fmt.Println("overrides:", agent.RulesDir()+"/<agent>.toml (herdr manifests work too)")
+		for _, k := range agent.Kinds {
+			m, warn := agent.ManifestFor(k)
+			fmt.Printf("%-9s %d rules, %s", k, len(m.Rules), m.Source)
+			if m.Version != "" {
+				fmt.Printf(" (version %s)", m.Version)
+			}
+			fmt.Println()
+			if warn != "" {
+				fmt.Println("          warning:", warn)
+			}
+		}
+	case args[0] == "explain" && len(args) <= 2:
+		pane := os.Getenv("TMUX_PANE")
+		if len(args) == 2 {
+			pane = args[1]
+		}
+		if pane == "" {
+			fmt.Fprintln(os.Stderr, usage)
+			os.Exit(2)
+		}
+		out, err := agent.Explain(c, pane)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "lazymux:", err)
+			os.Exit(1)
+		}
+		fmt.Print(out)
+	case args[0] == "show" && len(args) == 2:
+		text := agent.BundledRules(agent.Kind(args[1]))
+		if text == "" {
+			fmt.Fprintf(os.Stderr, "lazymux: no rules for %q\n", args[1])
+			os.Exit(2)
+		}
+		fmt.Print(text)
+	default:
+		fmt.Fprintln(os.Stderr, usage)
+		os.Exit(2)
 	}
 }
 

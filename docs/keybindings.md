@@ -16,7 +16,7 @@ Legend: ✅ available · 🔜 planned (phase in brackets)
 | `shift+tab`, `h`, `←` | previous panel | ✅ |
 | `1` `2` `3` | jump to panel | ✅ |
 | `/` | filter the focused list (fuzzy; `enter` keeps it, `esc` clears it) | ✅ |
-| `ctrl+p` | jump anywhere: fuzzy search over all sessions / windows / panes | ✅ |
+| `f` (or `ctrl+p`) | find: jump anywhere, one fuzzy search over all agents, sessions, windows and panes | ✅ |
 
 ## Sessions, windows and panes
 
@@ -51,6 +51,7 @@ These work on the Agents page (`a` switches pages). There, `tab` / `h` / `l` swi
 | --- | --- | --- |
 | `a` | switch page: tmux ⇄ agents (works on both pages) | ✅ |
 | `[` / `]` | state tab: All / Blocked / Working / Done | ✅ |
+| `/` | filter agents: program, session, window, state, summary, waiting reason, directory | ✅ |
 | `j` / `k`, `g` / `G` | move in the agent list (scroll Activity when it is focused) | ✅ |
 | `enter` | go to the agent's pane; on a session header: fold / unfold | ✅ |
 | `space` | fold / unfold the session header under the cursor | ✅ |
@@ -78,6 +79,6 @@ These work on the Agents page (`a` switches pages). There, `tab` / `h` / `l` swi
 | --- | --- |
 | input (new / rename) | `enter` confirm · `esc` cancel · `tab` complete dir or next field · `ctrl+f` pick the dir with fzf (when installed) · `shift+tab` / `↑` previous field · `←` `→` `space` change the choice row |
 | confirm kill | `y` yes · `n` / `esc` / `q` no · `←` `→` `tab` move between choices · `enter` pick the highlighted choice (default: No) |
-| picker (`m`, `ctrl+p`) | type to filter · `↑` `↓` / `ctrl+j` `ctrl+k` move · `enter` pick · `tab` select only (ctrl+p) · `esc` close |
+| picker (`m`, `f`) | type to filter · `↑` `↓` / `ctrl+j` `ctrl+k` move · `enter` pick · `tab` select only (`f`) · `esc` close |
 | filter line (`/`) | type to filter · `↑` `↓` move · `enter` keep the filter · `esc` clear it |
 | help | `j` / `k` move · `enter` run · `/` filter · `esc` clear filter / close · `q` / `?` close |

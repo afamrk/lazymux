@@ -54,7 +54,7 @@ Control tmux and the coding agents running in it easily, on a laptop screen (abo
 | sidebar, unfocused | lazymux - Sidebar (Laptop 1280x800) | built |
 | sidebar, focused at 60% | lazymux - Sidebar Focused (60%) (Laptop 1280x800) | built |
 | filter, multi-select, move picker | lazymux - Filter, Multi-select & Move Picker (Laptop 1280x800) | built (P2) |
-| jump anywhere | lazymux - Jump Anywhere (ctrl+p) (Laptop 1280x800) | built (P2) |
+| jump anywhere | lazymux - Jump Anywhere (f, was ctrl+p) (Laptop 1280x800) | built (P2) |
 | project picker / worktree | – | to design (P5) |
 
 Stitch sometimes changed the background behind dialogs (adding a top bar, dropping panel borders). Only the dialogs themselves are the design; in the app they float over the normal main view.
