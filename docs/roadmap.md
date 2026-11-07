@@ -5,6 +5,9 @@
 ### ✅ P0: browse and switch
 Three panels with cascading selection, fixed content-aware panel sizes, live colored preview refreshed every second, `enter` to switch (client pinning with `--client`, `tmux attach` outside tmux), popup binding.
 
+### ✅ Sidebar
+`lazymux sidebar toggle` (bind to `prefix` + `b`): one sidebar per session, docked on the left of the current window and following you via tmux hooks; compact overview when unfocused, the full UI at 60% width when focused; re-docks itself after layout changes.
+
 ### ✅ P1: manage
 New session / window / pane (with an fzf directory picker), rename, kill with a confirm dialog, undo, mark + move / join, swap, break, zoom, layout cycling, toasts, context-aware key bar, filterable and runnable help screen.
 
@@ -38,7 +41,7 @@ Fill the Agents page (already reachable with `a`, with its state tabs), as desig
 | question | options | notes |
 | --- | --- | --- |
 | How to detect agents and their state (P3) | scraping (process tree + screen + pane title), hooks (agents report events), or both | Hooks give richer data (Activity timeline, waiting reason, prompt) but need setup per agent. Scraping works with zero setup. The code is planned around a `Detector` interface so both can coexist. |
-| Undo history | keep in memory (now) · save to `~/.cache/lazymux/undo.json` so it survives reopening the popup · remove undo | In popup mode lazymux closes after every switch, so in-memory undo only covers the current popup session. |
+| Undo history | keep in memory (now) · save to `~/.cache/lazymux/undo.json` so it survives restarts · remove undo | The sidebar keeps running, so in-memory undo now covers a whole working session; it is lost when the sidebar is closed. |
 
 ## Backlog
 

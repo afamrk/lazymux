@@ -46,7 +46,8 @@ var bindings = []binding{
 	{"a", "switch page (tmux ⇄ agents)", "Global", 1, "a", false},
 	{"N", "open project (sessionizer)", "Global", 1, "", true},
 	{"?", "this help", "Global", 1, "", false},
-	{"q", "quit", "Global", 1, "q", false},
+	{"q", "quit (sidebar: back to your pane)", "Global", 1, "q", false},
+	{"Q", "turn the sidebar off", "Global", 1, "Q", false},
 }
 
 // keyMsg builds the KeyMsg for a binding's run key.

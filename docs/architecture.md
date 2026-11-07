@@ -9,9 +9,11 @@ internal/tmux/             everything that talks to tmux
   tree.go                  Session / Window / Pane types; ListTree (one list-panes call) + ParseTree
   actions.go               capture, switch, new, rename, kill, move, swap, break, zoom, layout, send-keys
   snapshot.go              undo: Snap{Session,Window,Pane} before a kill, Restore after
+  sidebar.go               sidebar panes: toggle, follow / re-dock, off, hooks, focus and size queries
 internal/ui/               the terminal UI (Bubble Tea model)
   app.go                   Model: selection, focus, refresh loop, key routing, layout and panel rendering
   actions.go               what each action key does: dialogs, marks, toasts, undo stack
+  sidebar.go               sidebar mode: focus handling, width changes, compact view
   agents.go                the Agents page: page switch (`a`), state tabs, its panels and keys
   fzf.go                   ctrl+f directory picker in dialogs (fzf over zoxide + fd)
   modal.go                 dialogs (input, confirm, help) + overlay / dim helpers
@@ -27,7 +29,7 @@ internal/ui/               the terminal UI (Bubble Tea model)
                     │                                   │
           ┌─────────▼─────────┐               ┌─────────▼─────────┐
           │ tmux list-panes -a│               │ tmux capture-pane │
-          │   -F <19 fields>  │               │   -e -p -t %id    │
+          │   -F <20 fields>  │               │   -e -p -t %id    │
           └─────────┬─────────┘               └─────────┬─────────┘
                treeMsg                             previewMsg
                     │                                   │
@@ -91,6 +93,21 @@ Bubble Tea delivers runes that arrive in the same read as **one** `KeyMsg` (for 
 ## Undo
 
 Before a kill, `SnapSession` / `SnapWindow` / `SnapPane` record names, the window index, the layout string, and per pane the directory and a re-run command (`rerunCommand`: shells and interpreters are skipped, `claude` → `claude --continue`, `codex` → `codex resume --last`, anything else re-runs by name). `Restore` recreates the items with `new-session` / `new-window` / `split-window -c <dir>`, applies the layout, and types the commands with `send-keys`, so a shell stays behind when the program exits. The stack holds 20 snapshots in memory.
+
+## Sidebar
+
+`lazymux sidebar toggle` sets the global user option `@lazymux_sidebar_on` and installs two hooks in slot `[90]` (user hooks are left alone):
+
+```
+session-window-changed[90]  run-shell -b "lazymux sidebar follow '#{session_id}'"
+client-session-changed[90]  run-shell -b "lazymux sidebar follow '#{session_id}'"
+```
+
+`SidebarFollow(session)` keeps exactly one sidebar per session docked in the session's current window. It creates one with `split-window -hbfd -l 30` (and marks it with the pane option `@lazymux_sidebar=<session id>`), moves it with `join-pane -hbfd -l 30`, or re-docks it (`break-pane` + `join-pane`) when it is no longer full height at the left edge. The pane keeps running while it moves, so cursor, undo stack and page survive.
+
+`ParseTree` reads `@lazymux_sidebar` for every pane and puts sidebar panes into `Tree.Sidebars` instead of `Window.Panes`, so no other code sees them.
+
+Inside the sidebar the program runs with `tea.WithReportFocus()`. `FocusMsg` / `BlurMsg` resize the pane to 60% of the window or back to 30 columns. Each tick also asks tmux (`SidebarState`) whether the pane is active in the active window of an attached session, what its width is, and whether it is docked. That covers missing focus events, fixes a stale width after a move, and re-docks after layout changes. `View` renders `viewCompact` while unfocused or narrower than 50 columns; otherwise it renders the normal UI with the panel column at 45% of the pane.
 
 ## Planned: agent detection (P3)
 

@@ -75,6 +75,10 @@ func (w *Window) ActivePane() *Pane {
 // Tree is the full server state from one list-panes call.
 type Tree struct {
 	Sessions []*Session
+	// Sidebars holds lazymux sidebar panes by the session they serve. They
+	// are kept out of Window.Panes so that counts, previews, kills and moves
+	// never see them.
+	Sidebars map[string]*Pane
 }
 
 // fields queried per pane; pane_title is last because it is free text and may
@@ -84,7 +88,7 @@ var paneFields = []string{
 	"window_id", "window_index", "window_name", "window_active", "window_layout",
 	"pane_id", "pane_index", "pane_active", "pane_current_command",
 	"pane_current_path", "pane_pid", "pane_width", "pane_height",
-	"window_last_flag", "pane_last",
+	"window_last_flag", "pane_last", SidebarOpt,
 	"pane_title",
 }
 
@@ -110,7 +114,7 @@ func (c *Client) ListTree() (*Tree, error) {
 // ParseTree builds a Tree from list-panes output produced with paneFormat.
 // Row order from tmux is session → window index → pane index, which we keep.
 func ParseTree(out string) (*Tree, error) {
-	t := &Tree{}
+	t := &Tree{Sidebars: map[string]*Pane{}}
 	sessions := map[string]*Session{}
 	windows := map[string]*Window{} // key: session_id + window_id (linked windows repeat per session)
 	for _, line := range strings.Split(out, "\n") {
@@ -134,11 +138,16 @@ func ParseTree(out string) (*Tree, error) {
 			windows[wkey] = w
 			s.Windows = append(s.Windows, w)
 		}
-		w.Panes = append(w.Panes, &Pane{
+		p := &Pane{
 			ID: f[8], Index: atoi(f[9]), Active: f[10] == "1", Command: f[11],
 			Path: f[12], PID: atoi(f[13]), Width: atoi(f[14]), Height: atoi(f[15]),
-			Last: f[17] == "1", Title: f[18], Window: w,
-		})
+			Last: f[17] == "1", Title: f[19], Window: w,
+		}
+		if f[18] != "" {
+			t.Sidebars[f[18]] = p
+			continue
+		}
+		w.Panes = append(w.Panes, p)
 	}
 	return t, nil
 }

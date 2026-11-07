@@ -64,7 +64,10 @@ These work on the Agents page (`a` switches pages). There, `tab` / `h` / `l` swi
 | key | action | |
 | --- | --- | --- |
 | `?` | help / keybindings | ✅ |
-| `q`, `ctrl+c` | quit | ✅ |
+| `q`, `ctrl+c` | quit (in the sidebar `q` goes back to your pane instead) | ✅ |
+| `esc` | sidebar: back to your pane (clears a mark first) | ✅ |
+| `Q` | sidebar: turn sidebars off everywhere | ✅ |
+| `prefix` + `b` | tmux binding: turn the sidebar on / off (`lazymux sidebar toggle`) | ✅ |
 | `N` | open a project (sessionizer) | 🔜 P5 |
 
 ## Inside dialogs

@@ -30,6 +30,11 @@ func main() {
 	}
 
 	c := &tmux.Client{Socket: *socket, ClientTTY: *client}
+	args := flag.Args()
+	if len(args) > 0 && args[0] == "sidebar" {
+		sidebar(c, args[1:])
+		return
+	}
 	m := ui.New(c)
 	if _, err := tea.NewProgram(m, tea.WithAltScreen()).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "lazymux:", err)
@@ -44,6 +49,29 @@ func main() {
 			err = syscall.Exec(bin, argv, os.Environ())
 		}
 		fmt.Fprintln(os.Stderr, "lazymux: attach:", err)
+		os.Exit(1)
+	}
+}
+
+// sidebar handles `lazymux sidebar [toggle|follow <session>|off]`. Without a
+// subcommand it runs the UI inside the sidebar pane.
+func sidebar(c *tmux.Client, args []string) {
+	var err error
+	switch {
+	case len(args) == 0:
+		m := ui.NewSidebar(c)
+		_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithReportFocus()).Run()
+	case args[0] == "toggle":
+		err = c.SidebarToggle()
+	case args[0] == "off":
+		err = c.SidebarOff()
+	case args[0] == "follow" && len(args) == 2:
+		err = c.SidebarFollow(args[1])
+	default:
+		err = fmt.Errorf("usage: lazymux sidebar [toggle | off | follow <session-id>]")
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "lazymux:", err)
 		os.Exit(1)
 	}
 }

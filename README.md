@@ -22,8 +22,9 @@ A lazygit-style terminal UI for tmux. Browse every session, window and pane in t
 
 | Phase | What | Status |
 | --- | --- | --- |
-| P0 | Panels, live preview, switching, popup mode | ✅ done |
+| P0 | Panels, live preview, switching | ✅ done |
 | P1 | New / rename / kill + undo / move / swap / break / zoom / layout, dialogs, help | ✅ done |
+| Sidebar | Docked left pane that follows you; compact when unfocused, full UI at 60% when focused | ✅ done |
 | P2 | `/` filter, multi-select, jump anywhere (`ctrl+p`) | planned |
 | P3 | Agents page (`a`): state tabs All / Blocked / Working / Done, agents grouped by session, blocked / working / idle, answer from lazymux | planned |
 | P4 | Desktop notifications, `lazymux status` for the tmux status line | planned |
@@ -48,21 +49,16 @@ Make sure `~/.local/bin` is on your `PATH`.
 
 ## Quick start
 
-Run it in any terminal or tmux pane:
-
-```sh
-lazymux
-```
-
-The recommended way is a tmux popup. Add this to `~/.tmux.conf` and reload (`tmux source ~/.tmux.conf`):
+lazymux lives in a sidebar on the left of your tmux window. Add this to `~/.tmux.conf` and reload (`tmux source ~/.tmux.conf`):
 
 ```tmux
-bind L display-popup -E -w 90% -h 90% "lazymux --client '#{client_tty}'"
+set -g focus-events on
+bind b run-shell "lazymux sidebar toggle"
 ```
 
-Now `prefix` + `L` opens lazymux on top of whatever you are doing. Pick something, press `enter`, and the popup closes with your terminal switched to it.
+Now `prefix` + `b` turns the sidebar on or off. It follows you to whatever window you switch to. Unfocused it is a 30-column overview of your sessions and windows; move into it (`prefix` + `←` or a click) and it grows to 60% of the window with the full UI. `esc` takes you back to your pane.
 
-Outside tmux, `enter` attaches your terminal to the chosen session.
+You can also run plain `lazymux` in any terminal: inside tmux `enter` switches and exits, outside tmux it attaches your terminal to the chosen session.
 
 ## Most used keys
 
@@ -78,13 +74,14 @@ Outside tmux, `enter` attaches your terminal to the chosen session.
 | `z` · `b` · `L` | zoom · break pane out · next layout |
 | `a` | switch page: tmux ⇄ agents |
 | `?` | all keys (filterable, runnable) |
-| `q` | quit |
+| `esc` / `q` | sidebar: back to your pane (plain lazymux: quit) |
+| `Q` | turn the sidebar off |
 
 Full reference: [docs/keybindings.md](docs/keybindings.md).
 
 ## Documentation
 
-- [User guide](docs/guide.md): the layout, every action explained, marks, undo, popup vs. standalone
+- [User guide](docs/guide.md): the layout, every action explained, marks, undo, the sidebar
 - [Keybindings](docs/keybindings.md): complete reference, including planned keys
 - [Architecture](docs/architecture.md): how the code is organized and why
 - [Development](docs/development.md): building, testing, trying changes against a throwaway tmux server

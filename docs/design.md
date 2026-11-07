@@ -8,6 +8,8 @@ Control tmux and the coding agents running in it easily, on a laptop screen (abo
 
 ## Decisions
 
+**Sidebar first.** lazymux lives in a herdr-style sidebar pane on the left of the current window (toggled with `prefix` + `b`, one per session, following you between windows). Unfocused it is a 30-column overview; focused it grows to 60% of the window and shows the full UI below, with a smaller preview. This replaced the popup as the main way to use lazymux.
+
 **Layout: lazygit style.** Four alternatives were mocked and rejected: a single collapsible tree, an agent dashboard grid, a command-palette popup, and ranger-style Miller columns. The lazygit layout won, with changes for small screens:
 
 - **Two pages instead of 4 panels.** The tmux page has 3 panels (Sessions / Windows / Panes). Agents live on their own page with [1] the agent list and [2] Activity; `a` switches pages and a `tmux │ agents` indicator sits at the right of the key bar. (Agents were first a tab of panel [1]; the user preferred a separate page.)
@@ -47,6 +49,8 @@ Control tmux and the coding agents running in it easily, on a laptop screen (abo
 | new session / rename dialogs | lazymux - Input Dialogs (Laptop 1280x800) | built (P1) |
 | confirm kill + undo toast | lazymux - Confirm Kill Dialog & Undo Toast | built (P1) |
 | help | lazymux - Keybindings Help Modal | built (P1) |
+| sidebar, unfocused | lazymux - Sidebar (Laptop 1280x800) | built |
+| sidebar, focused at 60% | lazymux - Sidebar Focused (60%) (Laptop 1280x800) | built |
 | filter / multi-select | – | to design (P2) |
 | project picker / worktree | – | to design (P5) |
 
@@ -56,6 +60,7 @@ Stitch sometimes changed the background behind dialogs (adding a top bar, droppi
 
 - The main-view mockup still shows the old `Sessions │ Agents` tab title; the app shows `[1] Sessions` and the `tmux │ agents` indicator.
 - The Agents page mockup adds a cwd / PID line and a styled permission box to the preview; the app shows the raw pane only.
+- The sidebar mockups show agent badges, a summary in the header and agent rows; until P3 the app shows "detection arrives in P3" there. The compact view expands every session (the current one in bold).
 - The mockups show agent badges (`⣿1`, `blocked 2m`) on session and window rows; they arrive with agent detection in P3.
 - The confirm dialog lists running programs (`running: go, nvim`) where the mockup showed an agent warning; the agent-specific warning comes in P3.
 - The new-window dialog has no "start in" choice: it always creates a window in the selected session.

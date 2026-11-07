@@ -47,6 +47,11 @@ type Model struct {
 
 	selfPane string // lazymux's own pane ($TMUX_PANE), never previewed
 
+	sidebar bool // running as `lazymux sidebar`
+	focused bool // sidebar pane has focus (shows the full UI)
+
+	compactCur int // line of the current window in the compact view (for scrolling)
+
 	modal    modal    // open dialog, if any
 	mark     *markRef // target for move / swap
 	toast    toastState
@@ -282,12 +287,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		return m, tea.Batch(m.fetchTree(), m.fetchPreview(), tick())
+		return m, tea.Batch(m.fetchTree(), m.fetchPreview(), m.checkFocus(), tick())
+
+	case tea.FocusMsg:
+		return m, m.setFocused(true, 0)
+	case tea.BlurMsg:
+		return m, m.setFocused(false, 0)
+	case focusMsg:
+		return m, m.reconcile(msg)
 
 	case switchMsg:
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
+		}
+		if m.sidebar { // the sidebar stays; focus moved to the target pane
+			return m, m.fetchTree()
 		}
 		return m, tea.Quit
 
@@ -333,6 +348,18 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 		return m, tea.Batch(cmds...)
+	}
+	if m.sidebar {
+		switch k.String() {
+		case "q", "esc":
+			if k.String() == "esc" && m.mark != nil {
+				m.mark = nil
+				return m, nil
+			}
+			return m, m.leaveSidebar()
+		case "Q":
+			return m, m.sidebarOff()
+		}
 	}
 	switch k.String() {
 	case "a":
@@ -438,8 +465,15 @@ func (m *Model) View() string {
 		return stSub.Render("loading…")
 	}
 
+	if m.compactView() {
+		return m.viewCompact()
+	}
 	bodyH := m.h - 1
-	leftW := clamp(m.w*30/100, 32, m.w-30)
+	leftPct := 30
+	if m.sidebar { // the pane is already narrow: give the panels more of it
+		leftPct = 45
+	}
+	leftW := clamp(m.w*leftPct/100, 32, m.w-30)
 	if m.w < 64 { // too narrow for a preview
 		leftW = m.w
 	}
@@ -683,7 +717,11 @@ func (m *Model) viewBar() string {
 	if m.mark != nil {
 		keys = append(keys, kd{"◆", m.mark.label})
 	}
-	keys = append(keys, kd{"enter", "switch"}, kd{"n", "new"}, kd{"r", "rename"}, kd{"d", "kill"})
+	keys = append(keys, kd{"enter", "switch"})
+	if m.sidebar {
+		keys = append(keys, kd{"esc", "back"})
+	}
+	keys = append(keys, kd{"n", "new"}, kd{"r", "rename"}, kd{"d", "kill"})
 	if len(m.undo) > 0 {
 		keys = append(keys, kd{"u", "undo"})
 	}
@@ -695,9 +733,13 @@ func (m *Model) viewBar() string {
 	case panelPanes:
 		keys = append(keys, kd{"z", "zoom"}, kd{"b", "break"}, kd{"m", "join"}, kd{"s", "swap"}, kd{"space", "mark"})
 	}
-	keys = append(keys, kd{"a", "agents"}, kd{"?", "help"}, kd{"q", "quit"})
+	last := kd{"q", "quit"}
+	if m.sidebar {
+		last = kd{"Q", "close sidebar"}
+	}
+	keys = append(keys, kd{"a", "agents"}, kd{"?", "help"}, last)
 	if m.page == pageAgents {
-		keys = []kd{{"[ ]", "tabs"}, {"tab", "panel"}, {"a", "tmux"}, {"?", "help"}, {"q", "quit"}}
+		keys = []kd{{"[ ]", "tabs"}, {"tab", "panel"}, {"a", "tmux"}, {"?", "help"}, last}
 	}
 
 	right := m.pageIndicator()

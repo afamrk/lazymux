@@ -8,7 +8,7 @@
 - [Marks: move and swap](#marks-move-and-swap)
 - [Pane and window tools](#pane-and-window-tools)
 - [Help screen](#help-screen)
-- [Popup vs. standalone](#popup-vs-standalone)
+- [The sidebar](#the-sidebar)
 - [Command-line flags](#command-line-flags)
 
 ## The screen
@@ -68,7 +68,7 @@ lazymux starts with the session, window and pane you are currently in already se
 - in **Windows**: select that window and switch to its session
 - in **Panes**: select that window and pane, and switch
 
-Inside tmux, the client is switched (see [Popup vs. standalone](#popup-vs-standalone) for which client). Outside tmux, lazymux exits and attaches your terminal to the session.
+Inside tmux, the client is switched (see [the sidebar](#the-sidebar) for which client). Outside tmux, lazymux exits and attaches your terminal to the session.
 
 ## Creating and renaming
 
@@ -129,7 +129,7 @@ What undo **cannot** bring back, because tmux cannot revive a process:
 - the state of running servers, tests or REPLs (they start over)
 - shell history and environment changes of that pane
 
-Undo keeps the last 20 kills, most recent first, but only while lazymux is running. In popup mode it closes after every switch, so undo mostly helps with mistakes made in the same popup session. (Whether to keep the history on disk is an [open decision](roadmap.md#open-decisions).)
+Undo keeps the last 20 kills, most recent first, but only while lazymux is running. The sidebar keeps running, so undo covers everything since the sidebar started; a plain `lazymux` run exits after every switch, so there it only covers that run. (Whether to keep the history on disk is an [open decision](roadmap.md#open-decisions).)
 
 ## Marks: move and swap
 
@@ -170,19 +170,29 @@ These need a window with at least two panes; otherwise a toast explains why noth
 - `/`: filter (type to narrow, e.g. `zoom`); `esc` clears the filter
 - `esc`, `q` or `?`: close
 
-## Popup vs. standalone
+## The sidebar
 
-**Popup (recommended).** With the binding from the README:
+lazymux is meant to live in a **sidebar**: a pane on the left of your current window.
 
 ```tmux
-bind L display-popup -E -w 90% -h 90% "lazymux --client '#{client_tty}'"
+set -g focus-events on
+bind b run-shell "lazymux sidebar toggle"
 ```
 
-lazymux opens on top of your current window and closes after `enter`. The `--client '#{client_tty}'` part pins switching to *the terminal that opened the popup*. Without it, tmux switches "the most recently active client", which goes wrong when several terminals are attached to the same server.
+- **`prefix` + `b`** turns the sidebar on or off. "On" is global: every session gets its own sidebar, and it **follows you**. A tmux hook moves it into whichever window becomes current, so it is always docked on the left, full height, 30 columns wide.
+- **Unfocused**, it is a compact overview: `lazymux` and the current page at the top, then every session with its windows (the current session in bold, `▸` marking the window you are in), and an agents section, which is empty until P3. On the Agents page it shows the state tabs and agents instead. If the list is longer than the pane, it scrolls so your current window stays visible.
+- **Focus it** like any other pane (`prefix` + `←`, a mouse click, `select-pane -L`). It grows to **60% of the window** and shows the full lazymux described in this guide: the three panels, a preview (smaller than when lazymux runs full screen), the Agents page, dialogs and help.
+- **Leave it** with `esc` or `q` (focus goes back to the pane you came from), or move to another pane yourself. It shrinks back to 30 columns.
+- **`enter`** switches to the selection and the sidebar stays. Focus moves to the target, so the sidebar shrinks, and if you went to another window the sidebar moves there too.
+- **`Q`** turns the sidebar off everywhere, like `prefix` + `b`.
 
-**In a pane or window.** Just run `lazymux`. It behaves the same; `enter` switches your client and lazymux exits.
+Other details:
+- The sidebar pane is invisible to lazymux itself. It is not listed in the Panes panel, not counted, never previewed, and moves, kills and undo never touch it.
+- If a layout change (`L`, `select-layout`, a new split) pushes the sidebar out of place, it docks itself back within a second. Zooming another pane (`z` / `prefix` + `z`) is left alone.
+- Without `focus-events on`, lazymux still notices focus changes, but only within a second.
+- Killing the window the sidebar is in kills the sidebar too; a new one appears in the next current window.
 
-**Outside tmux.** Run `lazymux` in a plain terminal. It talks to the default tmux server; `enter` prepares the selection and then replaces lazymux with `tmux attach` to that session.
+**Without the sidebar.** Run `lazymux` in any pane or terminal. `enter` switches and lazymux exits. Outside tmux, `enter` replaces lazymux with `tmux attach` to the chosen session. `--client '#{client_tty}'` pins switching to one terminal when several are attached (useful in a `display-popup` binding).
 
 ## Command-line flags
 
@@ -191,3 +201,10 @@ lazymux opens on top of your current window and closes after `enter`. The `--cli
 | `--client <tty>` | client to switch, e.g. `'#{client_tty}'` in a key binding |
 | `-L <name>` | use the tmux server with this socket name (same as `tmux -L`) |
 | `--version` | print the version and exit |
+
+| subcommand | meaning |
+| --- | --- |
+| `lazymux sidebar toggle` | turn sidebars on / off (for the key binding) |
+| `lazymux sidebar off` | close all sidebars and remove the hooks |
+| `lazymux sidebar` | run the sidebar UI (started by the toggle inside the sidebar pane) |
+| `lazymux sidebar follow <session-id>` | dock the session's sidebar in its current window (run by the hook) |

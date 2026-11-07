@@ -9,10 +9,10 @@ import (
 func TestParseTree(t *testing.T) {
 	row := func(f ...string) string { return strings.Join(f, sep) }
 	out := strings.Join([]string{
-		row("$0", "work", "1", "@0", "1", "editor", "1", "L1", "%0", "0", "1", "nvim", "/home/u", "100", "120", "40", "0", "0", "title\twith tab"),
-		row("$0", "work", "1", "@0", "1", "editor", "1", "L1", "%1", "1", "0", "zsh", "/home/u", "101", "60", "40", "0", "1", ""),
-		row("$0", "work", "1", "@1", "2", "shell", "0", "L2", "%2", "0", "1", "zsh", "/tmp", "102", "180", "40", "1", "0", ""),
-		row("$1", "notes", "0", "@2", "1", "main", "1", "L3", "%3", "0", "1", "claude", "/n", "103", "180", "40", "0", "0", "✳ fix bug"),
+		row("$0", "work", "1", "@0", "1", "editor", "1", "L1", "%0", "0", "1", "nvim", "/home/u", "100", "120", "40", "0", "0", "", "title\twith tab"),
+		row("$0", "work", "1", "@0", "1", "editor", "1", "L1", "%1", "1", "0", "zsh", "/home/u", "101", "60", "40", "0", "1", "", ""),
+		row("$0", "work", "1", "@1", "2", "shell", "0", "L2", "%2", "0", "1", "zsh", "/tmp", "102", "180", "40", "1", "0", "", ""),
+		row("$1", "notes", "0", "@2", "1", "main", "1", "L3", "%3", "0", "1", "claude", "/n", "103", "180", "40", "0", "0", "", "✳ fix bug"),
 	}, "\n")
 	tr, err := ParseTree(out)
 	if err != nil {
@@ -197,5 +197,64 @@ func TestBreakPaneStaysInSession(t *testing.T) {
 	}
 	if out, _ := c.Run("list-windows", "-t", "other"); strings.Count(out, "\n") != 0 {
 		t.Errorf("window leaked into other session: %q", out)
+	}
+}
+
+// TestSidebarToggleFollowOff: the toggle docks a sidebar on the left, it
+// follows the session's current window, and off removes it and the hooks.
+func TestSidebarToggleFollowOff(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	sidebarCmdOverride = "sleep 600"
+	defer func() { sidebarCmdOverride = "" }()
+	c := &Client{Socket: "lazymux-test-sidebar"}
+	c.Run("kill-server")
+	defer c.Run("kill-server")
+	sid, err := c.Run("-f", "/dev/null", "new-session", "-d", "-s", "s", "-x", "120", "-y", "40", "-P", "-F", "#{session_id}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w2, _, err := c.NewWindow(sid, "two", "/tmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Run("select-window", "-t", sid+":0")
+	if err := c.SidebarToggle(); err != nil {
+		t.Fatal(err)
+	}
+	where := func() (win string, left, width int) {
+		out, _ := c.Run("list-panes", "-a", "-F", "#{window_id}\t#{pane_left}\t#{pane_width}\t#{"+SidebarOpt+"}")
+		for _, l := range strings.Split(out, "\n") {
+			f := strings.Split(l, "\t")
+			if len(f) == 4 && f[3] == sid {
+				return f[0], atoi(f[1]), atoi(f[2])
+			}
+		}
+		return "", -1, -1
+	}
+	win0, _ := c.Run("display-message", "-p", "-t", sid+":0", "#{window_id}")
+	if w, left, width := where(); w != win0 || left != 0 || width != SidebarWidth {
+		t.Fatalf("after toggle: sidebar in %q left=%d width=%d, want %s left=0 width=%d", w, left, width, win0, SidebarWidth)
+	}
+	tr, _ := c.ListTree()
+	if tr.Sidebars[sid] == nil || len(tr.Sessions[0].Windows[0].Panes) != 1 {
+		t.Errorf("tree: sidebar must be in Sidebars and out of Panes")
+	}
+	c.Run("select-window", "-t", w2)
+	if err := c.SidebarFollow(sid); err != nil { // what the hook runs
+		t.Fatal(err)
+	}
+	if w, left, _ := where(); w != w2 || left != 0 {
+		t.Errorf("after follow: sidebar in %q left=%d, want %s left=0", w, left, w2)
+	}
+	if err := c.SidebarOff(); err != nil {
+		t.Fatal(err)
+	}
+	if w, _, _ := where(); w != "" {
+		t.Errorf("sidebar still present after off")
+	}
+	if hooks, _ := c.Run("show-hooks", "-g"); strings.Contains(hooks, "["+hookIndex+"]") {
+		t.Errorf("hooks left behind: %s", hooks)
 	}
 }

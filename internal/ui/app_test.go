@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/afamrk/lazymux/internal/tmux"
 )
@@ -13,11 +14,11 @@ func fakeTree(t *testing.T) *tmux.Tree {
 	t.Helper()
 	row := func(f ...string) string { return strings.Join(f, "\t") }
 	tr, err := tmux.ParseTree(strings.Join([]string{
-		row("$0", "api", "0", "@0", "1", "editor", "0", "L", "%0", "0", "1", "nvim", "/", "1", "80", "24", "0", "0", ""),
-		row("$0", "api", "0", "@1", "2", "claude", "1", "L", "%1", "0", "1", "claude", "/", "2", "80", "24", "0", "0", ""),
-		row("$1", "notes", "0", "@2", "1", "main", "1", "L", "%2", "0", "1", "zsh", "/", "3", "80", "24", "0", "0", ""),
-		row("$2", "work", "1", "@3", "1", "w", "1", "L", "%3", "0", "0", "zsh", "/", "4", "40", "24", "0", "1", ""),
-		row("$2", "work", "1", "@3", "1", "w", "1", "L", "%4", "1", "1", "go", "/", "5", "40", "24", "0", "0", ""),
+		row("$0", "api", "0", "@0", "1", "editor", "0", "L", "%0", "0", "1", "nvim", "/", "1", "80", "24", "0", "0", "", ""),
+		row("$0", "api", "0", "@1", "2", "claude", "1", "L", "%1", "0", "1", "claude", "/", "2", "80", "24", "0", "0", "", ""),
+		row("$1", "notes", "0", "@2", "1", "main", "1", "L", "%2", "0", "1", "zsh", "/", "3", "80", "24", "0", "0", "", ""),
+		row("$2", "work", "1", "@3", "1", "w", "1", "L", "%3", "0", "0", "zsh", "/", "4", "40", "24", "0", "1", "", ""),
+		row("$2", "work", "1", "@3", "1", "w", "1", "L", "%4", "1", "1", "go", "/", "5", "40", "24", "0", "0", "", ""),
 	}, "\n"))
 	if err != nil {
 		t.Fatal(err)
@@ -196,5 +197,98 @@ func TestAgentsPageToggle(t *testing.T) {
 	m.Update(key("]")) // no-op on the tmux page
 	if m.agentTab != agentBlocked {
 		t.Errorf("[ ] changed the agent tab from the tmux page")
+	}
+}
+
+func sidebarModel(t *testing.T) *Model {
+	t.Helper()
+	row := func(f ...string) string { return strings.Join(f, "\t") }
+	tr, err := tmux.ParseTree(strings.Join([]string{
+		row("$0", "api", "1", "@0", "1", "editor", "1", "L", "%9", "0", "0", "lazymux", "/", "1", "30", "40", "0", "0", "$0", ""),
+		row("$0", "api", "1", "@0", "1", "editor", "1", "L", "%0", "1", "1", "nvim", "/", "1", "109", "40", "0", "0", "", ""),
+		row("$0", "api", "1", "@1", "2", "server", "0", "L", "%1", "0", "1", "go", "/", "2", "140", "40", "1", "0", "", ""),
+		row("$1", "notes", "0", "@2", "1", "main", "1", "L", "%2", "0", "1", "zsh", "/", "3", "140", "40", "0", "0", "", ""),
+	}, "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &Model{c: &tmux.Client{Socket: "lazymux-unused"}, sidebar: true, selfPane: "%9"}
+	m.Update(tea.WindowSizeMsg{Width: 30, Height: 30})
+	m.Update(treeMsg{tree: tr})
+	return m
+}
+
+func TestSidebarCompactView(t *testing.T) {
+	m := sidebarModel(t)
+	if len(m.tree.Sessions[0].Windows[0].Panes) != 1 {
+		t.Fatalf("sidebar pane must not be listed in its window")
+	}
+	v := m.View()
+	for _, want := range []string{"lazymux", "▾ api", "▸ 1 editor", "2 server", "▾ notes", "1 main", "agents"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("compact view missing %q:\n%s", want, v)
+		}
+	}
+	if strings.Contains(v, "[1] Sessions") {
+		t.Errorf("unfocused sidebar must not show the full UI")
+	}
+}
+
+func TestSidebarFocusShowsFullUIAndEnterStays(t *testing.T) {
+	m := sidebarModel(t)
+	m.Update(tea.FocusMsg{})
+	m.Update(tea.WindowSizeMsg{Width: 84, Height: 40})
+	if !m.focused || !strings.Contains(m.View(), "[1] Sessions") {
+		t.Fatalf("focused sidebar should show the full UI:\n%s", m.View())
+	}
+	if _, cmd := m.Update(switchMsg{}); cmd != nil {
+		if _, quit := cmd().(tea.QuitMsg); quit {
+			t.Errorf("enter must not quit the sidebar")
+		}
+	}
+	m.Update(tea.BlurMsg{})
+	m.Update(tea.WindowSizeMsg{Width: 30, Height: 40})
+	if m.focused || strings.Contains(m.View(), "[1] Sessions") {
+		t.Errorf("blurred sidebar should be compact")
+	}
+}
+
+func TestSidebarCompactFollowsPage(t *testing.T) {
+	m := sidebarModel(t)
+	m.Update(tea.FocusMsg{})
+	m.Update(key("a")) // Agents page
+	m.Update(key("]")) // Blocked tab
+	m.Update(tea.BlurMsg{})
+	v := m.View()
+	for _, want := range []string{"agents", "All0", "Blk0", "no blocked agents"} {
+		if !strings.Contains(ansi.Strip(v), want) {
+			t.Errorf("compact agents view missing %q:\n%s", want, v)
+		}
+	}
+	if strings.Contains(v, "▾ api") {
+		t.Errorf("compact view on the Agents page must not show the tmux tree:\n%s", v)
+	}
+	m.Update(tea.FocusMsg{})
+	m.Update(key("a")) // back to tmux
+	m.Update(tea.BlurMsg{})
+	if !strings.Contains(m.View(), "▾ api") {
+		t.Errorf("compact view on the tmux page should show the tree")
+	}
+}
+
+func TestSidebarCompactScrollsToCurrentWindow(t *testing.T) {
+	m := sidebarModel(t)
+	for h := 6; h <= 14; h++ {
+		m.Update(tea.WindowSizeMsg{Width: 30, Height: h})
+		v := m.View()
+		if !strings.Contains(v, "▸ 1 editor") {
+			t.Errorf("height %d: current window not visible:\n%s", h, v)
+		}
+		if !strings.Contains(v, "lazymux") {
+			t.Errorf("height %d: header scrolled away", h)
+		}
+		if n := strings.Count(v, "\n") + 1; n != h {
+			t.Errorf("height %d: rendered %d lines", h, n)
+		}
 	}
 }
