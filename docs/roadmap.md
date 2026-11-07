@@ -3,7 +3,7 @@
 ## Phases
 
 ### ✅ P0: browse and switch
-Three panels with cascading selection, fixed content-aware panel sizes, live colored preview refreshed every second, `enter` to switch (client pinning with `--client`, `tmux attach` outside tmux), popup binding.
+Three panels with cascading selection, fixed content-aware panel sizes, live colored preview refreshed every second, `enter` to switch (client pinning with `--client`, `tmux attach` outside tmux), popup binding (later replaced by the sidebar).
 
 ### ✅ Sidebar
 `lazymux sidebar toggle` (bind to `prefix` + `b`): one sidebar per session, docked on the left of the current window and following you via tmux hooks; compact overview when unfocused, the full UI at 60% width when focused; re-docks itself after layout changes.

@@ -1,21 +1,39 @@
 # lazymux
 
-A lazygit-style terminal UI for tmux. Browse every session, window and pane in three panels, watch a live preview of the selected pane, and create, rename, kill, move, swap, zoom and re-layout things with single keys. An **Agents** page (press `a`) for the AI coding agents running in your sessions (Claude Code, Codex, OpenCode…) is on the way.
+A sidebar for tmux, in the spirit of [herdr](https://github.com/herdrdev/herdr) and [lazygit](https://github.com/jesseduffield/lazygit). It sits on the left of your current window and follows you from window to window. Unfocused, it is a compact list of every session and window. Move into it and it grows into a lazygit-style UI: browse sessions, windows and panes in three panels with a live preview, and create, rename, kill, move, swap, zoom and re-layout things with single keys. An **Agents** page (press `a`) for the AI coding agents running in your sessions (Claude Code, Codex, OpenCode…) is on the way.
+
+Unfocused (30 columns):
 
 ```
-╭─[1] Sessions ────────────────╮╭─ api:1.%4 · claude ──────────────────────────────────────╮
-│  ● work                  3w  ││ (live output of the selected pane, with colors)          │
-│    dotfiles              1w  ││                                                          │
-│◆   api                   2w  ││                                                          │
-╰──────────────────── 3 of 3 ─╯│                                                          │
-╭─[2] Windows (api) ──────────╮│                                                          │
-│  0 editor          nvim *   ││                                                          │
-│  1 claude       2p claude   ││                                                          │
-╰──────────────────── 1 of 2 ─╯│                                                          │
-╭─[3] Panes (0:editor) ───────╮│                                                          │
-│  %2 nvim         120x40 *   ││                                                          │
-╰──────────────────── 1 of 1 ─╯╰──────────────────────────────────────────────────────────╯
- ◆ session api · enter switch · n new · r rename · d kill · m move · ? help   tmux │ agents
+ lazymux                 tmux │ your panes
+                              │
+ ▾ api                     4w │
+  ▸ 0 editor             nvim │
+    1 server               go │
+    3 claude           claude │
+ ▾ work                    3w │
+    0 code               nvim │
+    1 ai                codex │
+                              │
+─ agents ─────────────────────│
+ detection arrives in P3      │
+```
+
+Focused (60% of the window):
+
+```
+╭─[1] Sessions ──────────────╮╭─ api:3.%12 · claude ──────────────╮│ your
+│ ● api                   4w ││ (live output of the selected pane)││ panes,
+│   work                  3w ││                                   ││ squeezed
+╰─────────────────── 1 of 2 ─╯│                                   ││
+╭─[2] Windows (api) ─────────╮│                                   ││
+│ 0 editor           nvim *  ││                                   ││
+│ 3 claude      2p claude    ││                                   ││
+╰─────────────────── 1 of 3 ─╯│                                   ││
+╭─[3] Panes (0:editor) ──────╮│                                   ││
+│ %2 nvim        120x40 *    ││                                   ││
+╰─────────────────── 1 of 1 ─╯╰───────────────────────────────────╯│
+ enter switch · esc back · n new · r rename · d kill   tmux │ agents
 ```
 
 ## Status
@@ -45,7 +63,7 @@ git clone <this repo> lazymux && cd lazymux
 go build -o ~/.local/bin/lazymux ./cmd/lazymux
 ```
 
-Make sure `~/.local/bin` is on your `PATH`.
+Make sure `~/.local/bin` is on your `PATH`. After rebuilding, press `prefix` + `b` twice so the running sidebars restart with the new binary.
 
 ## Quick start
 
@@ -56,9 +74,15 @@ set -g focus-events on
 bind b run-shell "lazymux sidebar toggle"
 ```
 
-Now `prefix` + `b` turns the sidebar on or off. It follows you to whatever window you switch to. Unfocused it is a 30-column overview of your sessions and windows; move into it (`prefix` + `←` or a click) and it grows to 60% of the window with the full UI. `esc` takes you back to your pane.
+Now:
 
-You can also run plain `lazymux` in any terminal: inside tmux `enter` switches and exits, outside tmux it attaches your terminal to the chosen session.
+1. `prefix` + `b` opens the sidebar (and closes it again later).
+2. Move into it like into any pane (`prefix` + `←`, or click it). It grows to 60% of the window.
+3. Pick something with `j` / `k` / `tab` and press `enter` to go there, or `esc` to go back to your pane. Either way the sidebar shrinks back.
+
+`Q` inside the sidebar, or `lazymux sidebar off` from a shell, also closes it.
+
+You can still run plain `lazymux` in a terminal, full screen: inside tmux `enter` switches and exits, outside tmux it attaches your terminal to the chosen session.
 
 ## Most used keys
 

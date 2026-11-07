@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -24,7 +23,6 @@ const minFullWidth = 50
 func NewSidebar(c *tmux.Client) *Model {
 	m := New(c)
 	m.sidebar = true
-	m.selfPane = os.Getenv("TMUX_PANE")
 	return m
 }
 
@@ -84,7 +82,8 @@ func (m *Model) setFocused(f bool, winW int) tea.Cmd {
 	resize := func() tea.Msg {
 		w := winW
 		if w == 0 {
-			_, w, _, _ = c.PaneFocus(pane)
+			st, _ := c.SidebarState(pane)
+			w = st.WinW
 		}
 		c.ResizeWidth(pane, sidebarWidth(f, w))
 		return nil

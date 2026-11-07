@@ -1,9 +1,9 @@
 # Architecture
 
-lazymux is a single Go binary. It never keeps tmux state of its own: every second it asks tmux for the full session/window/pane tree, and every action is a plain `tmux` command.
+lazymux is a single Go binary, normally running as a sidebar pane in each session (see [Sidebar](#sidebar)). It never keeps tmux state of its own: every second it asks tmux for the full session/window/pane tree, and every action is a plain `tmux` command.
 
 ```
-cmd/lazymux/main.go        flags, starts the Bubble Tea program, execs `tmux attach` when outside tmux
+cmd/lazymux/main.go        flags; `sidebar [toggle|off|follow]` subcommands; starts the Bubble Tea program (sidebar or full screen); execs `tmux attach` when outside tmux
 internal/tmux/             everything that talks to tmux
   client.go                Client{Socket, ClientTTY}; Run(args…) execs `tmux [-L socket] args…`
   tree.go                  Session / Window / Pane types; ListTree (one list-panes call) + ParseTree

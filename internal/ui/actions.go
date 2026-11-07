@@ -78,8 +78,6 @@ func (m *Model) handleAction(msg actionMsg) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func fail(err error) tea.Cmd { return func() tea.Msg { return actionMsg{err: err} } }
-
 // --- new / rename ----------------------------------------------------------
 
 func (m *Model) newCmd() tea.Cmd {

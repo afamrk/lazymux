@@ -163,14 +163,6 @@ func (c *Client) ResizeWidth(pane string, cols int) error {
 	return err
 }
 
-// PaneFocus reports the pane's own and its window's width, and whether the
-// pane is the one you are typing in (active pane of the active window of an
-// attached session).
-func (c *Client) PaneFocus(pane string) (paneW, winW int, focused bool, err error) {
-	st, err := c.SidebarState(pane)
-	return st.PaneW, st.WinW, st.Focused, err
-}
-
 // SidebarPaneState describes the sidebar pane as tmux sees it.
 type SidebarPaneState struct {
 	PaneW, WinW int

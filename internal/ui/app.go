@@ -482,7 +482,7 @@ func (m *Model) View() string {
 	if m.page == pageAgents {
 		// agent rows carry a summary line, so this page's list is wider
 		if leftW < m.w {
-			leftW = clamp(m.w*36/100, min(46, m.w-30), m.w-30)
+			leftW = max(leftW, clamp(m.w*36/100, min(46, m.w-30), m.w-30))
 		}
 		left = m.viewAgentsLeft(leftW, bodyH)
 	} else {

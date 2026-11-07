@@ -1,5 +1,6 @@
 # User guide
 
+- [The sidebar](#the-sidebar)
 - [The screen](#the-screen)
 - [Moving around](#moving-around)
 - [Switching](#switching)
@@ -8,10 +9,35 @@
 - [Marks: move and swap](#marks-move-and-swap)
 - [Pane and window tools](#pane-and-window-tools)
 - [Help screen](#help-screen)
-- [The sidebar](#the-sidebar)
 - [Command-line flags](#command-line-flags)
 
+## The sidebar
+
+lazymux lives in a **sidebar**: a pane on the left of your current window. Everything else in this guide describes what you see when the sidebar is focused (or when you run plain `lazymux` full screen).
+
+```tmux
+set -g focus-events on
+bind b run-shell "lazymux sidebar toggle"
+```
+
+- **`prefix` + `b`** turns the sidebar on or off. "On" is global: every session gets its own sidebar, and it **follows you**. A tmux hook moves it into whichever window becomes current, so it is always docked on the left, full height, 30 columns wide.
+- **Unfocused**, it is a compact overview: `lazymux` and the current page at the top, then every session with its windows (the current session in bold, `▸` marking the window you are in), and an agents section, which is empty until P3. On the Agents page it shows the state tabs and agents instead. If the list is longer than the pane, it scrolls so your current window stays visible.
+- **Focus it** like any other pane (`prefix` + `←`, a mouse click, `select-pane -L`). It grows to **60% of the window** and shows the full lazymux described in this guide: the three panels, a preview (smaller than when lazymux runs full screen), the Agents page, dialogs and help.
+- **Leave it** with `esc` or `q` (focus goes back to the pane you came from), or move to another pane yourself. It shrinks back to 30 columns.
+- **`enter`** switches to the selection and the sidebar stays. Focus moves to the target, so the sidebar shrinks, and if you went to another window the sidebar moves there too.
+- **`Q`** turns the sidebar off everywhere, like `prefix` + `b`.
+
+Other details:
+- The sidebar pane is invisible to lazymux itself. It is not listed in the Panes panel, not counted, never previewed, and moves, kills and undo never touch it.
+- If a layout change (`L`, `select-layout`, a new split) pushes the sidebar out of place, it docks itself back within a second. Zooming another pane (`z` / `prefix` + `z`) is left alone.
+- Without `focus-events on`, lazymux still notices focus changes, but only within a second.
+- Killing the window the sidebar is in kills the sidebar too; a new one appears in the next current window.
+
+**Without the sidebar.** Run `lazymux` in any pane or terminal. `enter` switches and lazymux exits. Outside tmux, `enter` replaces lazymux with `tmux attach` to the chosen session. `--client '#{client_tty}'` pins switching to one terminal when several are attached (useful in a `display-popup` binding).
+
 ## The screen
+
+This is the focused sidebar (or plain `lazymux`):
 
 ```
 ╭─[1] Sessions ───────────╮╭─ session:window.%pane · command ─────────────╮
@@ -42,7 +68,7 @@ The **focused** panel has a blue border and a bold, highlighted row. Panel sizes
 
 Each panel shows `n of m` in its bottom border: the position of the selection.
 
-**Right side**: the live preview of the selected pane. It is the pane's visible screen with its colors, refreshed every second. The border shows `session:window.%pane · command`. If lazymux runs in a normal pane and the session or window you select resolves to that pane, the preview shows the pane you came from instead (the window's last pane, or the session's last window); the border names the pane actually shown. Only when you select lazymux's own pane in the Panes panel does it say "(this is lazymux itself)", instead of drawing a picture inside a picture.
+**Right side**: the live preview of the selected pane. It is the pane's visible screen with its colors, refreshed every second. The border shows `session:window.%pane · command`. The sidebar pane itself is never shown or listed. If you run plain `lazymux` in a normal pane and the session or window you select resolves to that pane, the preview shows the pane you came from instead (the window's last pane, or the session's last window); the border names the pane actually shown. Only when you select lazymux's own pane in the Panes panel does it say "(this is lazymux itself)", instead of drawing a picture inside a picture.
 
 **Bottom bar**: key hints for the focused panel, plus the marked item (`◆ …`) when there is one. Hints that don't fit are dropped; `?` always lists everything.
 
@@ -62,13 +88,13 @@ lazymux starts with the session, window and pane you are currently in already se
 
 ## Switching
 
-`enter` switches to the selection, then lazymux exits:
+`enter` switches to the selection. The sidebar stays open (it shrinks, because focus moves to the target); plain `lazymux` exits.
 
 - in **Sessions**: switch to that session, keeping its current window
 - in **Windows**: select that window and switch to its session
 - in **Panes**: select that window and pane, and switch
 
-Inside tmux, the client is switched (see [the sidebar](#the-sidebar) for which client). Outside tmux, lazymux exits and attaches your terminal to the session.
+Inside tmux, the client showing the sidebar is switched (plain `lazymux` can be pinned to a terminal with `--client`, see [the sidebar](#the-sidebar)). Outside tmux, plain `lazymux` exits and attaches your terminal to the session.
 
 ## Creating and renaming
 
@@ -169,30 +195,6 @@ These need a window with at least two panes; otherwise a toast explains why noth
 - `enter`: run the selected key, as if you had pressed it
 - `/`: filter (type to narrow, e.g. `zoom`); `esc` clears the filter
 - `esc`, `q` or `?`: close
-
-## The sidebar
-
-lazymux is meant to live in a **sidebar**: a pane on the left of your current window.
-
-```tmux
-set -g focus-events on
-bind b run-shell "lazymux sidebar toggle"
-```
-
-- **`prefix` + `b`** turns the sidebar on or off. "On" is global: every session gets its own sidebar, and it **follows you**. A tmux hook moves it into whichever window becomes current, so it is always docked on the left, full height, 30 columns wide.
-- **Unfocused**, it is a compact overview: `lazymux` and the current page at the top, then every session with its windows (the current session in bold, `▸` marking the window you are in), and an agents section, which is empty until P3. On the Agents page it shows the state tabs and agents instead. If the list is longer than the pane, it scrolls so your current window stays visible.
-- **Focus it** like any other pane (`prefix` + `←`, a mouse click, `select-pane -L`). It grows to **60% of the window** and shows the full lazymux described in this guide: the three panels, a preview (smaller than when lazymux runs full screen), the Agents page, dialogs and help.
-- **Leave it** with `esc` or `q` (focus goes back to the pane you came from), or move to another pane yourself. It shrinks back to 30 columns.
-- **`enter`** switches to the selection and the sidebar stays. Focus moves to the target, so the sidebar shrinks, and if you went to another window the sidebar moves there too.
-- **`Q`** turns the sidebar off everywhere, like `prefix` + `b`.
-
-Other details:
-- The sidebar pane is invisible to lazymux itself. It is not listed in the Panes panel, not counted, never previewed, and moves, kills and undo never touch it.
-- If a layout change (`L`, `select-layout`, a new split) pushes the sidebar out of place, it docks itself back within a second. Zooming another pane (`z` / `prefix` + `z`) is left alone.
-- Without `focus-events on`, lazymux still notices focus changes, but only within a second.
-- Killing the window the sidebar is in kills the sidebar too; a new one appears in the next current window.
-
-**Without the sidebar.** Run `lazymux` in any pane or terminal. `enter` switches and lazymux exits. Outside tmux, `enter` replaces lazymux with `tmux attach` to the chosen session. `--client '#{client_tty}'` pins switching to one terminal when several are attached (useful in a `display-popup` binding).
 
 ## Command-line flags
 

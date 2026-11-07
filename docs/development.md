@@ -17,14 +17,41 @@ go test ./...
 
 | package | tests |
 | --- | --- |
-| `internal/tmux` | `ParseTree` on fixture lines (including a title with a tab), `TrimCapture`, `rerunCommand`, plus **integration tests** against private tmux servers: listing and capturing (`-L lazymux-test`), kill + restore of a window and a session (`-L lazymux-test-undo`), break-pane staying in its session (`-L lazymux-test-break`) |
-| `internal/ui` | the model driven with key messages on a fake tree: navigation cascade and multi-rune keys, the kill dialog defaulting to No, the help screen running a filtered row, the hint shown by `m` without a mark |
+| `internal/tmux` | `ParseTree` on fixture lines (including a title with a tab), `TrimCapture`, `rerunCommand`, plus **integration tests** against private tmux servers: listing and capturing (`-L lazymux-test`), kill + restore of a window and a session (`-L lazymux-test-undo`), break-pane staying in its session (`-L lazymux-test-break`), sidebar toggle / follow / off with sidebar panes kept out of the tree (`-L lazymux-test-sidebar`, with a `sleep` standing in for the lazymux binary) |
+| `internal/ui` | the model driven with key messages on a fake tree: navigation cascade and multi-rune keys, the kill dialog defaulting to No, the help screen running a filtered row, the hint shown by `m` without a mark, fixed panel heights, preview skipping the own pane, the fzf pick filling the dialog, the Agents page toggle; sidebar mode: compact view (all sessions, scrolling to the current window, following the page), focus / blur switching to the full UI, `enter` not quitting |
 
 The integration tests start servers with `-f /dev/null` (so your `~/.tmux.conf` is not loaded) and kill them at the end. They are skipped when `tmux` is not installed.
 
+## Trying the sidebar by hand
+
+Use a separate tmux server in a new terminal, so your real sessions are never touched:
+
+```sh
+go build -o /tmp/lazymux ./cmd/lazymux
+cat > /tmp/lzdemo.conf <<'EOF2'
+set -g focus-events on
+set -g mouse on
+bind b run-shell "/tmp/lazymux -L lzdemo sidebar toggle"
+EOF2
+tmux -L lzdemo -f /tmp/lzdemo.conf new-session -s work
+```
+
+Inside it, `prefix` + `b` opens the sidebar. Click it or use `prefix` + `←` to focus it, and `esc` to leave. Create windows (`prefix` + `c`) and switch between them to watch it follow. `tmux -L lzdemo kill-server` cleans up.
+
+Focus only counts while a client is attached, so scripted checks with `send-keys` need a real client. Attach one from a second server:
+
+```sh
+command tmux -L lzouter -f /dev/null new-session -d -x 140 -y 41 "TMUX= tmux -L lzdemo attach -t work"
+command tmux -L lzdemo run-shell "/tmp/lazymux -L lzdemo sidebar toggle"
+SB=$(command tmux -L lzdemo list-panes -a -F '#{pane_id} #{@lazymux_sidebar}' | awk '$2!=""{print $1}')
+command tmux -L lzdemo select-pane -t $SB           # focus: it widens to 60%
+command tmux -L lzdemo list-panes -F '#{pane_id} #{pane_width}'
+command tmux -L lzdemo capture-pane -p -t $SB       # what it drew
+```
+
 ## Trying changes against a throwaway server
 
-Never test destructive keys on your real sessions. Run lazymux inside a separate server and drive it with `send-keys`; `capture-pane` shows exactly what it drew:
+For the full-screen UI and its keys, plain `lazymux` is easier to script. Never test destructive keys on your real sessions. Run lazymux inside a separate server and drive it with `send-keys`; `capture-pane` shows exactly what it drew:
 
 ```sh
 go build -o /tmp/lazymux ./cmd/lazymux
