@@ -1,6 +1,8 @@
 package tmux
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -215,4 +217,34 @@ func (c *Client) SendLine(paneID, text string) error {
 	}
 	_, err := c.Run("send-keys", "-t", paneID, "Enter")
 	return err
+}
+
+// CaptureText returns the visible contents of a pane as plain text.
+func (c *Client) CaptureText(paneID string) (string, error) {
+	return c.Run("capture-pane", "-p", "-t", paneID)
+}
+
+// SendKeys sends tmux key names (e.g. "Escape", "C-c", "y") to a pane.
+func (c *Client) SendKeys(paneID string, keys ...string) error {
+	_, err := c.Run(append([]string{"send-keys", "-t", paneID}, keys...)...)
+	return err
+}
+
+// ServerName is the name of the tmux server lazymux talks to: the -L socket,
+// or the socket of the tmux lazymux runs in, or "default".
+func (c *Client) ServerName() string {
+	if c.Socket != "" {
+		return c.Socket
+	}
+	return ServerFromEnv(os.Getenv("TMUX"))
+}
+
+// ServerFromEnv extracts the socket name from a $TMUX value such as
+// "/tmp/tmux-1000/default,3751,0".
+func ServerFromEnv(env string) string {
+	path, _, _ := strings.Cut(env, ",")
+	if path == "" {
+		return "default"
+	}
+	return filepath.Base(path)
 }

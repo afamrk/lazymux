@@ -16,7 +16,8 @@ type seg struct {
 
 // renderRow lays out left segments flush left and right segments flush right
 // in exactly width cells. The left side is truncated with "…" when needed.
-// sel is 0 (none), 1 (selected in unfocused panel) or 2 (selected, focused).
+// sel is 0 (none), 1 (selected in unfocused panel), 2 (selected, focused) or
+// 3 (selected, focused, not bold: the second line of a two-line row).
 func renderRow(left, right []seg, width int, sel int) string {
 	rw := segsWidth(right)
 	if rw > width {
@@ -33,7 +34,7 @@ func renderRow(left, right []seg, width int, sel int) string {
 	switch sel {
 	case 1:
 		bg = cSelDim
-	case 2:
+	case 2, 3:
 		bg = cSurface0
 	}
 	style := func(st lipgloss.Style) lipgloss.Style {
@@ -98,6 +99,16 @@ func renderBox(title, footer string, lines []string, w, h int, focused bool) str
 		footer = fst.Render(footer)
 	}
 	return renderFrame(title, footer, false, lines, w, h, color)
+}
+
+// titleRight puts right at the right end of a box's top border, after
+// title; the gap is filled with border dashes in color.
+func titleRight(title, right string, w int, color lipgloss.TerminalColor) string {
+	gap := w - 4 - ansi.StringWidth(title) - ansi.StringWidth(right)
+	if gap < 1 {
+		return title
+	}
+	return title + lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("─", gap)) + right
 }
 
 // renderFrame is the general box: border color, title (already styled) in the

@@ -266,6 +266,15 @@ func (m *Model) killCmd() tea.Cmd {
 			body = append(body, stSub.Render("   ◆ "+v.label))
 		}
 	}
+	var agents []string
+	for _, p := range all {
+		if a := m.agents[p.ID]; a != nil {
+			agents = append(agents, fmt.Sprintf("%s %d:%s (%s)", a.Kind, p.Window.Index, p.Window.Name, a.Label()))
+		}
+	}
+	if len(agents) > 0 {
+		body = append(body, "", stRed.Render("   ⣿ ends agents: "+strings.Join(agents, ", ")))
+	}
 	if r := running(all); len(r) > 0 {
 		body = append(body, "", stRed.Render("   running: "+strings.Join(r, ", ")))
 	}

@@ -13,8 +13,8 @@ Control tmux and the coding agents running in it easily, on a laptop screen (abo
 **Layout: lazygit style.** Four alternatives were mocked and rejected: a single collapsible tree, an agent dashboard grid, a command-palette popup, and ranger-style Miller columns. The lazygit layout won, with changes for small screens:
 
 - **Two pages instead of 4 panels.** The tmux page has 3 panels (Sessions / Windows / Panes). Agents live on their own page with [1] the agent list and [2] Activity; `a` switches pages and a `tmux │ agents` indicator sits at the right of the key bar. (Agents were first a tab of panel [1]; the user preferred a separate page.)
-- **State tabs on the Agents page**: `All │ Blocked │ Working │ Done` with counts, switched with `[` / `]` like lazygit. Idle is folded into Done; there is no error tab because agents do not report errors reliably.
-- **Fixed, content-aware sizing.** Panels share the column equally; a short list keeps only the rows it needs and gives the rest away. Sizes do not change with focus (an accordion was tried in P0 and dropped after use). The Agents page uses a wider left column (36%) because its rows carry a summary line.
+- **State tabs on the Agents page**: `All │ Blocked │ Working │ Done` with counts, switched with `[` / `]` like lazygit. Idle is folded into Done (the row says "idle" until the agent has worked once, "done" after); there is no error tab because agents do not report errors reliably.
+- **Fixed, content-aware sizing.** Panels share the column equally; a short list keeps only the rows it needs and gives the rest away. Sizes do not change with focus (an accordion was tried in P0 and dropped after use). The Agents page uses a wider left column (36%) because its rows carry a summary line. The left column is capped (60 columns, 64 on the Agents page) so on wide screens the preview grows instead, keeping the mockups' proportions. No italics: terminals set up as `screen-256color` draw them as reverse video.
 - **Preview only on the right.** No info sheet (process, tokens, state…) and no `Output │ Info` tabs, just the live pane output with a one-line title in the border.
 - **Context-aware bottom bar.** The hints change per panel and state; a blocked agent puts its answer keys first.
 - **Agents grouped by session**, each with a one-line summary of what it is doing.
@@ -46,7 +46,7 @@ Control tmux and the coding agents running in it easily, on a laptop screen (abo
 | --- | --- | --- |
 | main view | lazymux - Terminal TUI (Laptop 1280x800) | built (P0) |
 | Agents tab, grouped, preview only | lazymux - Grouped Agents & Full Terminal Preview | superseded by the Agents page |
-| Agents page with state tabs | lazymux - Agents Page with State Tabs (Laptop 1280x800) | approved; page switch built, content P3 |
+| Agents page with state tabs | lazymux - Agents Page with State Tabs (Laptop 1280x800) | built (P3) |
 | new session / rename dialogs | lazymux - Input Dialogs (Laptop 1280x800) | built (P1) |
 | confirm kill + undo toast | lazymux - Confirm Kill Dialog & Undo Toast | built (P1) |
 | help | lazymux - Keybindings Help Modal | built (P1) |
@@ -62,8 +62,8 @@ Stitch sometimes changed the background behind dialogs (adding a top bar, droppi
 
 - The main-view mockup still shows the old `Sessions │ Agents` tab title; the app shows `[1] Sessions` and the `tmux │ agents` indicator.
 - The Agents page mockup adds a cwd / PID line and a styled permission box to the preview; the app shows the raw pane only.
-- The sidebar mockups show agent badges, a summary in the header and agent rows; until P3 the app shows "detection arrives in P3" there. The compact view expands every session (the current one in bold).
+- The compact view expands every session (the mockup folds sessions without agents), with the current one in bold. Its hint says "focus to expand · ? keys": keys only work once the sidebar is focused.
 - The P2 filter mockup has an invented top bar and tab strip; the app has none. Selected rows use the existing one-column gutter for `◆`.
-- The mockups show agent badges (`⣿1`, `blocked 2m`) on session and window rows; they arrive with agent detection in P3.
-- The confirm dialog lists running programs (`running: go, nvim`) where the mockup showed an agent warning; the agent-specific warning comes in P3.
+- On the Agents page, session badges are plain colored text, not pills; the selected agent has no left accent bar (the rest of the app highlights rows with a background only); the list footer has no `[j/k] move` hint; an agent without a summary shows its directory on the second line.
+- The confirm dialog lists agents (`⣿ ends agents: claude 3:claude (blocked)`) and running programs (`running: go, nvim`).
 - The new-window dialog has no "start in" choice: it always creates a window in the selected session.

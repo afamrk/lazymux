@@ -1,22 +1,24 @@
 # lazymux
 
-A sidebar for tmux, in the spirit of [herdr](https://github.com/herdrdev/herdr) and [lazygit](https://github.com/jesseduffield/lazygit). It sits on the left of your current window and follows you from window to window. Unfocused, it is a compact list of every session and window. Move into it and it grows into a lazygit-style UI: browse sessions, windows and panes in three panels with a live preview, and create, rename, kill, move, swap, zoom and re-layout things with single keys. An **Agents** page (press `a`) for the AI coding agents running in your sessions (Claude Code, Codex, OpenCode…) is on the way.
+A sidebar for tmux, in the spirit of [herdr](https://github.com/herdrdev/herdr) and [lazygit](https://github.com/jesseduffield/lazygit). It sits on the left of your current window and follows you from window to window. Unfocused, it is a compact list of every session and window. Move into it and it grows into a lazygit-style UI: browse sessions, windows and panes in three panels with a live preview, and create, rename, kill, move, swap, zoom and re-layout things with single keys. The **Agents** page (press `a`) finds the AI coding agents running in your panes (Claude Code, Codex, Gemini CLI, opencode, aider), shows which are blocked, working or done, and lets you answer a permission prompt, reply or interrupt without leaving the sidebar.
 
 Unfocused (30 columns):
 
 ```
- lazymux                 tmux │ your panes
-                              │
- ▾ api                     4w │
+ lazymux             ⣿1 ⣾1 │ your panes
+ ▾ api                     ⣿1 │
   ▸ 0 editor             nvim │
     1 server               go │
-    3 claude           claude │
- ▾ work                    3w │
+    3 claude             ⣿ 2m │
+ ▾ work                    ⣾1 │
     0 code               nvim │
-    1 ai                codex │
+    1 ai                ⣾ 40s │
                               │
 ─ agents ─────────────────────│
- detection arrives in P3      │
+ ⣿ claude           api:3  2m │
+   fix jwt expiry · Bash(go t…│
+ ⣾ codex           work:1 40s │
+   add table tests for ui     │
 ```
 
 Focused (60% of the window):
@@ -44,7 +46,7 @@ Focused (60% of the window):
 | P1 | New / rename / kill + undo / move / swap / break / zoom / layout, dialogs, help | ✅ done |
 | Sidebar | Docked left pane that follows you; compact when unfocused, full UI at 60% when focused | ✅ done |
 | P2 | `/` filter, multi-select + bulk kill / move, jump anywhere (`ctrl+p`) | ✅ done |
-| P3 | Agents page (`a`): state tabs All / Blocked / Working / Done, agents grouped by session, blocked / working / idle, answer from lazymux | planned |
+| P3 | Agents page (`a`): agents grouped by session under All / Blocked / Working / Done tabs, answer / reply / interrupt, Activity timeline from Claude Code hooks | ✅ done |
 | P4 | Desktop notifications, `lazymux status` for the tmux status line | planned |
 | P5 | Project picker (sessionizer), git worktree + agent spawn | planned |
 
@@ -82,6 +84,18 @@ Now:
 
 `Q` inside the sidebar, or `lazymux sidebar off` from a shell, also closes it.
 
+### Agents
+
+Agents are found with no setup: lazymux looks at each pane's process and reads its screen to tell whether the agent is **blocked** (`⣿`, a permission prompt), **working** (`⣾`) or **done** (`●`). Press `a` for the Agents page; there `1` / `2` / `3` answer a prompt, `i` sends a reply, `x` interrupts and `B` jumps to the next blocked agent.
+
+For Claude Code you can add hooks, which give the Agents page the prompt, the exact tool call an agent waits on, and an Activity timeline:
+
+```sh
+lazymux hooks install     # adds lazymux to ~/.claude/settings.json (keeps a backup)
+lazymux hooks status
+lazymux hooks uninstall
+```
+
 You can still run plain `lazymux` in a terminal, full screen: inside tmux `enter` switches and exits, outside tmux it attaches your terminal to the chosen session.
 
 ## Most used keys
@@ -99,6 +113,7 @@ You can still run plain `lazymux` in a terminal, full screen: inside tmux `enter
 | `m` · `s` | move selection to… (picker) · swap selected with cursor |
 | `z` · `b` · `L` | zoom · break pane out · next layout |
 | `a` | switch page: tmux ⇄ agents |
+| `1` `2` `3` · `i` · `x` · `B` | Agents page: answer yes / always / no · reply · interrupt · next blocked |
 | `?` | all keys (filterable, runnable) |
 | `esc` / `q` | sidebar: back to your pane (plain lazymux: quit) |
 | `Q` | turn the sidebar off |
@@ -107,7 +122,7 @@ Full reference: [docs/keybindings.md](docs/keybindings.md).
 
 ## Documentation
 
-- [User guide](docs/guide.md): the layout, every action explained, marks, undo, the sidebar
+- [User guide](docs/guide.md): the layout, every action explained, undo, the sidebar, agents
 - [Keybindings](docs/keybindings.md): complete reference, including planned keys
 - [Architecture](docs/architecture.md): how the code is organized and why
 - [Development](docs/development.md): building, testing, trying changes against a throwaway tmux server

@@ -9,6 +9,7 @@
 - [Filter and jump](#filter-and-jump)
 - [Selecting, moving and swapping](#selecting-moving-and-swapping)
 - [Pane and window tools](#pane-and-window-tools)
+- [Agents](#agents)
 - [Help screen](#help-screen)
 - [Command-line flags](#command-line-flags)
 
@@ -22,7 +23,7 @@ bind b run-shell "lazymux sidebar toggle"
 ```
 
 - **`prefix` + `b`** turns the sidebar on or off. "On" is global: every session gets its own sidebar, and it **follows you**. A tmux hook moves it into whichever window becomes current, so it is always docked on the left, full height, 30 columns wide.
-- **Unfocused**, it is a compact overview: `lazymux` and the current page at the top, then every session with its windows (the current session in bold, `▸` marking the window you are in), and an agents section, which is empty until P3. On the Agents page it shows the state tabs and agents instead. If the list is longer than the pane, it scrolls so your current window stays visible.
+- **Unfocused**, it is a compact overview: `lazymux` and the current page at the top, then every session with its windows (the current session in bold, `▸` marking the window you are in), and an agents section listing every agent, blocked ones first, each with its summary line. The header shows the agent totals (`⣿1 ⣾2 ●1`); sessions carry a badge (`⣿1`) and windows with an agent show its state and age (`⣿ 2m`) instead of the command (see [Agents](#agents)). On the Agents page it shows the agents of the current tab, grouped by session. If the list is longer than the pane, it scrolls so your current window stays visible.
 - **Focus it** like any other pane (`prefix` + `←`, a mouse click, `select-pane -L`). It grows to **60% of the window** and shows the full lazymux described in this guide: the three panels, a preview (smaller than when lazymux runs full screen), the Agents page, dialogs and help.
 - **Leave it** with `esc` or `q` (focus goes back to the pane you came from), or move to another pane yourself. It shrinks back to 30 columns.
 - **`enter`** switches to the selection and the sidebar stays. Focus moves to the target, so the sidebar shrinks, and if you went to another window the sidebar moves there too.
@@ -55,13 +56,13 @@ This is the focused sidebar (or plain `lazymux`):
 
 **Two pages.** lazymux has a **tmux page** (described here) and an **Agents page**. Press `a` to switch between them; the right end of the bottom bar shows which one you are on (`tmux │ agents`), and each page keeps its own selection and focus.
 
-**Agents page** (content arrives in P3): panel [1] lists the coding agents in all sessions, grouped by session, under four state tabs switched with `[` / `]`: **All** (blocked first), **Blocked** (waiting for you: a permission prompt or a question), **Working**, and **Done** (finished its turn, waiting for a new prompt). Panel [2] **Activity** is a timeline of the selected agent, and the right side is its live pane. Panels are switched with `tab` / `h` / `l` there, because `1` / `2` / `3` will answer a blocked agent. tmux actions (`n`, `d`, `m`…) do nothing on this page. Until agent detection is built, the page is empty.
+**Agents page**: the coding agents in all sessions, their state, and what they wait for. See [Agents](#agents).
 
 **Left column** of the tmux page: three panels, like lazygit.
 
-- **[1] Sessions** lists every session. `●` (green) means a client is attached to it. The number on the right is its window count (`3w`). 
-- **[2] Windows** lists the windows of the selected session: index, name, pane count when there is more than one (`2p`), the command running in the active pane, and `*` on the session's active window.
-- **[3] Panes** lists the panes of the selected window: pane id (`%12`), command, size, and `*` on the active pane.
+- **[1] Sessions** lists every session. `●` (green) before the name means a client is attached to it. The number on the right is its window count (`3w`), preceded by an agent badge when the session runs agents: `⣿2` (two blocked), `⣾1` (one working) or `●` (all done).
+- **[2] Windows** lists the windows of the selected session: index, name, the state glyph of its most urgent agent, pane count when there is more than one (`2p`), the command running in the active pane, and `*` on the session's active window.
+- **[3] Panes** lists the panes of the selected window: pane id (`%12`), command, the agent state (`⣿ blocked`) for agent panes, size, and `*` on the active pane.
 
 Selection **cascades**: choosing a session shows its windows (starting at its active window), and choosing a window shows its panes (starting at its active pane).
 
@@ -201,6 +202,72 @@ Actions use the selection when there is one in the focused panel, otherwise the 
 
 These need a window with at least two panes; otherwise a toast explains why nothing happened.
 
+## Agents
+
+lazymux finds AI coding agents in every pane: **Claude Code, Codex, Gemini CLI, opencode and aider**. Nothing needs to be set up.
+
+**How it knows.** A pane runs an agent when its command is the agent (`claude`, `codex`…), or when a `node` / `python` / `bun` process in it runs one (npm installs of Gemini CLI and Codex). The state is read from the bottom of the agent's screen every second:
+
+| state | glyph | seen as |
+| --- | --- | --- |
+| **blocked** | `⣿` red | a permission prompt with a selected first option (`❯ 1. Yes`, `› 1. Yes, proceed`, `● 1. Allow once`); aider's `(Y)es/(N)o` question |
+| **working** | `⣾` yellow | `esc to interrupt` / `esc to cancel` in the status line, or Claude Code's spinner line (`✽ Thinking… (12s · ↓ 1k tokens)`); for aider, a screen that changed in the last 3 seconds |
+| **done** / idle | `●` green | neither: waiting for a prompt. It says **done** once the agent has worked, **idle** before that |
+
+The time next to the state (`blocked 2m`) is how long it has been in that state. Only the bottom of the screen counts, so the same words inside the conversation do not fool it.
+
+**The page** (`a`):
+
+```
+╭─[1] All 4 │ Blocked 1 │ Working 2 │ Done 1 ─╮╭─ api:3.%12 · claude ──── ⣿ blocked 2m ─╮
+│ ▾ api                                    ⣿1 ││                                       │
+│ ⣿ claude 3:claude                blocked 2m ││   live screen of the selected agent   │
+│   fix jwt expiry · waiting: Bash(go test…)  ││                                       │
+│                                             ││                                       │
+│ ▾ work                                   ⣾1 ││                                       │
+│ ⣾ codex 1:ai                     working 40s││                                       │
+│   add table tests for ui package            ││                                       │
+╰────────────────────────────────── 1 of 2 ───╯│                                       │
+╭─[2] Activity (claude@api:3) ─── 4 events ───╮│                                       │
+│ ▸ prompt  fix jwt expiry                    ││                                       │
+│   Read    internal/auth/jwt.go              ││                                       │
+│   Edit    internal/auth/jwt.go              ││                                       │
+│ ⣿ Bash    go test ./internal/auth/…  pending││                                       │
+╰─────────────────────────────────────────────╯╰───────────────────────────────────────╯
+ 1 yes · 2 always · 3 no · i reply · x interrupt  │ enter jump · [ ] tabs · tab panel · a tmux · ? help
+```
+
+- **[1]** lists agents grouped by session, sessions with a blocked agent first. Each agent has two lines: glyph, program and window, state and time; then a dim summary (the last prompt, or the title Claude Code gives its terminal) and, when blocked, what it waits for. An agent without a summary shows its directory.
+- **Tabs** `[` / `]`: **All**, **Blocked**, **Working**, **Done**, each with a live count. The unfocused sidebar shows the totals in its header (`⣿1 ⣾2 ●1`).
+- **Session headers** carry the worst state in the session. `enter` (or `space`) on a header folds or unfolds it.
+- **[2] Activity** is the timeline of the selected agent: prompts, tool calls (`Read`, `Edit`, `Bash`…) and `done` when a turn ends. The tool call a blocked agent waits on is tinted red and marked `pending`. It needs hooks (below); `j` / `k` scroll it when it is focused.
+- **Right side**: the agent's live pane.
+- `tab` / `h` / `l` switch between [1] and [2]. `1` / `2` / `3` do not switch panels here: they answer.
+
+**Acting on an agent:**
+
+| key | action |
+| --- | --- |
+| `1` / `2` / `3` | answer the permission prompt: yes / yes and don't ask again / no. Only when the agent is blocked. |
+| `i` | type a reply; it is sent to the agent's pane followed by `enter` |
+| `x` | interrupt the current turn (`esc`; `ctrl-c` for aider) |
+| `B` | select the next blocked agent (switches to the All tab and unfolds sessions when needed) |
+| `enter` | go to the agent's pane |
+
+The keys sent per agent: Claude Code and Gemini CLI get the digit (Gemini's "no" is `esc`), Codex gets `y` / `a` / `esc`, opencode `enter` / `a` / `esc`, aider `y` / `a` / `n` and `enter`. Look at the preview before answering: the key goes straight to the agent.
+
+Killing a pane, window or session with an agent in it adds `⣿ ends agents: claude 3:claude (blocked)` to the confirm dialog.
+
+**Claude Code hooks (optional).** Without hooks, lazymux knows the state but not the story. With them, Claude Code reports each prompt, tool call and notification to lazymux as it happens:
+
+```sh
+lazymux hooks install      # edits ~/.claude/settings.json, keeps settings.json.lazymux.bak
+lazymux hooks status
+lazymux hooks uninstall    # removes only lazymux's entries
+```
+
+`install` adds `lazymux hook` to the `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Notification`, `Stop` and `SessionEnd` hooks, next to any hooks you already have. Restart running Claude Code sessions to pick them up. Give a path to use another settings file (`lazymux hooks install .claude/settings.json`); `$CLAUDE_CONFIG_DIR` is respected. The hook writes one line per event to `~/.cache/lazymux/events/<server>-<pane>.jsonl` (the last 200 are kept; a new session starts a new log) and never prints anything or fails, so it cannot get in Claude's way.
+
 ## Help screen
 
 `?` opens the keybindings screen. It shows which panel you are in and lists every key in groups. Keys of later phases are dimmed and marked "(soon)".
@@ -224,3 +291,5 @@ These need a window with at least two panes; otherwise a toast explains why noth
 | `lazymux sidebar off` | close all sidebars and remove the hooks |
 | `lazymux sidebar` | run the sidebar UI (started by the toggle inside the sidebar pane) |
 | `lazymux sidebar follow <session-id>` | dock the session's sidebar in its current window (run by the hook) |
+| `lazymux hooks install \| uninstall \| status [settings.json]` | add / remove lazymux in Claude Code's hooks |
+| `lazymux hook` | record one Claude Code hook event from stdin (run by the hooks) |

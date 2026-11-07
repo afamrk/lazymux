@@ -45,17 +45,20 @@ What a key does depends on the focused panel.
 
 ## Agents
 
-These work on the Agents page (`a` switches pages). There, `tab` / `h` / `l` switch between the agent list and Activity.
+These work on the Agents page (`a` switches pages). There, `tab` / `h` / `l` switch between the agent list and Activity; `1` / `2` / `3` answer instead of switching panels. tmux actions (`n`, `d`, `m`…) do nothing on this page.
 
 | key | action | |
 | --- | --- | --- |
 | `a` | switch page: tmux ⇄ agents (works on both pages) | ✅ |
-| `[` / `]` | state tab: All / Blocked / Working / Done | ✅ (agents 🔜 P3) |
-| `1` / `2` / `3` | answer a blocked agent's permission question (yes / yes, don't ask again / no) | 🔜 P3 |
-| `i` | type a reply and send it to the agent | 🔜 P3 |
-| `x` | interrupt the agent (sends ctrl-c) | 🔜 P3 |
-| `B` | jump to the next blocked agent | 🔜 P3 |
-| `n` (Agents page) | start a new agent | 🔜 P3 |
+| `[` / `]` | state tab: All / Blocked / Working / Done | ✅ |
+| `j` / `k`, `g` / `G` | move in the agent list (scroll Activity when it is focused) | ✅ |
+| `enter` | go to the agent's pane; on a session header: fold / unfold | ✅ |
+| `space` | fold / unfold the session header under the cursor | ✅ |
+| `1` / `2` / `3` | answer a blocked agent's permission question (yes / yes, don't ask again / no) | ✅ |
+| `i` | type a reply and send it to the agent | ✅ |
+| `x` | interrupt the agent (`esc`; `ctrl-c` for aider) | ✅ |
+| `B` | jump to the next blocked agent | ✅ |
+| `n` (Agents page) | start a new agent | 🔜 P5 |
 | `w` | new git worktree + window + agent | 🔜 P5 |
 
 ## Global

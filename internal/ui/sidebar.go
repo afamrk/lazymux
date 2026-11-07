@@ -5,8 +5,10 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/afamrk/lazymux/internal/agent"
 	"github.com/afamrk/lazymux/internal/tmux"
 )
 
@@ -144,76 +146,120 @@ func (m *Model) viewCompact() string {
 	return m.compactFrame(lines, w, h)
 }
 
-// compactHeader is "lazymux" plus the page you left the sidebar on.
+// compactHeader is "lazymux" with the agent counts on the right
+// ("⣿1 ⣾2 ●1"), as in the sidebar mockup.
 func (m *Model) compactHeader(w int) string {
-	page := "tmux"
-	if m.page == pageAgents {
-		page = "agents"
+	var right []seg
+	if sum := m.agentSummary(); sum != "" {
+		right = []seg{{sum + " ", lipgloss.NewStyle()}}
 	}
-	return renderRow([]seg{{" lazymux", stMauve.Bold(true)}}, []seg{{page + " ", stBlue}}, w, 0)
+	return renderRow([]seg{{" lazymux", stMauve.Bold(true)}}, right, w, 0)
 }
 
-// compactAgents is the narrow Agents page: the state tabs on one line and
-// the agents grouped by session (empty until detection arrives in P3).
+// compactAgents is the narrow Agents page: the agents of the current tab
+// grouped by session, each with its summary line.
 func (m *Model) compactAgents(w int) []string {
-	counts := m.agentCounts()
-	short := [numAgentTabs]string{"All", "Blk", "Wrk", "Done"}
-	tabs := " "
-	for i, name := range short {
-		if i > 0 {
-			tabs += stFaint.Render(" ")
-		}
-		st := stFaint
-		if i == m.agentTab {
-			st = stTitleOn.Background(cSurface0)
-		}
-		tabs += st.Render(name) + agentTabStyle[i].Render(fmt.Sprint(counts[i]))
-	}
-	empty := "no agents yet"
+	lines := []string{m.compactHeader(w)}
 	if m.agentTab != agentAll {
-		empty = "no " + strings.ToLower(agentTabNames[m.agentTab]) + " agents"
+		lines = append(lines, divider(" "+strings.ToLower(agentTabNames[m.agentTab])+" ", w))
 	}
-	return []string{
-		m.compactHeader(w), "",
-		ansi.Truncate(tabs, w, ""),
-		divider("", w),
-		" " + stSub.Render(empty),
-		" " + stFaint.Render("detection arrives in P3"),
+	n := 0
+	for _, r := range m.agentRows() {
+		if r.a == nil {
+			lines = append(lines, "", renderRow([]seg{{" ▾ ", stFaint}, {r.sess.Name, stText.Bold(true)}}, []seg{headerBadge(r)}, w, 0))
+			continue
+		}
+		n++
+		lines = append(lines, m.compactAgentEntry(r.a, r.pane, w, false)...)
 	}
+	if n == 0 {
+		empty := "no agents running"
+		if m.agentTab != agentAll && m.agentCounts()[agentAll] > 0 {
+			empty = "no " + strings.ToLower(agentTabNames[m.agentTab]) + " agents"
+		}
+		lines = append(lines, "", " "+stSub.Render(empty))
+	}
+	return lines
 }
 
 // compactTmux is the narrow tmux page: every session with its windows
-// (the current session in bold, the current window marked), and the agents
-// section.
+// (the current session in bold, the current window marked; windows with an
+// agent show its state and age), then the agents.
 func (m *Model) compactTmux(w int, curSess *tmux.Session, curWin *tmux.Window) []string {
-	lines := []string{m.compactHeader(w), ""}
+	lines := []string{m.compactHeader(w)}
 	m.compactCur = -1
 	for _, s := range m.sessions() {
-		arrow, name := "▾ ", stSub
+		name := stSub
 		if s == curSess {
 			name = stText.Bold(true)
 		}
-		right := []seg{{fmt.Sprintf("%dw ", len(s.Windows)), stFaint}}
-		if s.Attached {
-			right = []seg{{"● ", stGreen}}
+		right := m.sessionBadge(s)
+		if right == nil {
+			right = []seg{{fmt.Sprintf("%dw ", len(s.Windows)), stFaint}}
 		}
-		lines = append(lines, renderRow([]seg{{" " + arrow, stFaint}, {s.Name, name}}, right, w, 0))
+		lines = append(lines, renderRow([]seg{{" ▾ ", stFaint}, {s.Name, name}}, right, w, 0))
 		for _, win := range s.Windows {
-			mark, st, sel := "   ", stSub, 0
+			mark, idx, st, sel := "   ", stFaint, stSub, 0
 			if win == curWin {
-				mark, st, sel = " ▸ ", stText, 2
+				mark, idx, st, sel = " ▸ ", stBlue, stText, 2
 				m.compactCur = len(lines)
 			}
-			cmd := ""
-			if p := win.ActivePane(); p != nil {
-				cmd = p.Command
+			var right []seg
+			if a := m.worstAgent(win.Panes); a != nil {
+				right = []seg{{stateGlyph(a.State) + " " + agent.Age(a.Since, clock()) + " ", stateStyle(a.State)}}
+			} else if p := win.ActivePane(); p != nil {
+				right = []seg{{p.Command + " ", stFaint}}
 			}
 			lines = append(lines, renderRow(
-				[]seg{{" " + mark, stBlue}, {fmt.Sprintf("%d ", win.Index), stBlue}, {win.Name, st}},
-				[]seg{{cmd + " ", stFaint}}, w, sel))
+				[]seg{{" " + mark, stBlue}, {fmt.Sprintf("%d ", win.Index), idx}, {win.Name, st}}, right, w, sel))
 		}
 	}
-	return append(lines, "", divider(" agents ", w), " "+stFaint.Render("detection arrives in P3"))
+	lines = append(lines, "", divider(" agents ", w))
+	n := 0
+	for _, st := range []agent.State{agent.Blocked, agent.Working, agent.Idle} {
+		for _, s := range m.sessions() {
+			as, ps := m.sessionAgents(s)
+			for i, a := range as {
+				if a.State == st {
+					lines = append(lines, m.compactAgentEntry(a, ps[i], w, true)...)
+					n++
+				}
+			}
+		}
+	}
+	if n == 0 {
+		lines = append(lines, " "+stFaint.Render("no agents running"))
+	}
+	return lines
+}
+
+// compactAgentEntry is one agent in the narrow sidebar:
+//
+//	⣿ claude      api:3   2m
+//	  fix jwt expiry · Bash(go…
+//
+// The location includes the session when withSession is set (the agents
+// section lists agents of every session together).
+func (m *Model) compactAgentEntry(a *agent.Agent, p *tmux.Pane, w int, withSession bool) []string {
+	st := stateStyle(a.State)
+	loc := fmt.Sprintf("%d:%s", p.Window.Index, p.Window.Name)
+	if withSession {
+		loc = fmt.Sprintf("%s:%d", p.Window.Session.Name, p.Window.Index)
+	}
+	out := []string{renderRow(
+		[]seg{{" " + stateGlyph(a.State) + " ", st}, {string(a.Kind), stText.Bold(true)}},
+		[]seg{{loc + "  ", stFaint}, {agent.Age(a.Since, clock()) + " ", st}}, w, 0)}
+	var parts []string
+	if a.Summary != "" {
+		parts = append(parts, a.Summary)
+	}
+	if a.Waiting != "" {
+		parts = append(parts, a.Waiting)
+	}
+	if len(parts) > 0 {
+		out = append(out, renderRow([]seg{{"   " + strings.Join(parts, " · "), stFaint}}, nil, w, 0))
+	}
+	return out
 }
 
 // compactFrame pads lines to the pane and adds the hint at the bottom.
@@ -224,7 +270,7 @@ func (m *Model) compactFrame(lines []string, w, h int) string {
 	// too long: scroll (below the header) so the current window stays visible
 	if len(lines) > body && m.compactCur > body-2 && body > 3 {
 		drop := min(m.compactCur-(body-2), len(lines)-body)
-		lines = append(lines[:2:2], lines[2+drop:]...)
+		lines = append(lines[:1:1], lines[1+drop:]...)
 	}
 	if len(lines) > body {
 		lines = lines[:max(0, body)]

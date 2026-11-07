@@ -3,10 +3,12 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/afamrk/lazymux/internal/agent"
 	"github.com/afamrk/lazymux/internal/tmux"
 )
 
@@ -355,7 +357,7 @@ func TestSidebarCompactFollowsPage(t *testing.T) {
 	m.Update(key("]")) // Blocked tab
 	m.Update(tea.BlurMsg{})
 	v := m.View()
-	for _, want := range []string{"agents", "All0", "Blk0", "no blocked agents"} {
+	for _, want := range []string{"lazymux", "─ blocked ─", "no agents running"} {
 		if !strings.Contains(ansi.Strip(v), want) {
 			t.Errorf("compact agents view missing %q:\n%s", want, v)
 		}
@@ -385,5 +387,138 @@ func TestSidebarCompactScrollsToCurrentWindow(t *testing.T) {
 		if n := strings.Count(v, "\n") + 1; n != h {
 			t.Errorf("height %d: rendered %d lines", h, n)
 		}
+	}
+}
+
+// agentModel is newTestModel with two agents: claude in api:2 (blocked) and
+// a working codex in work:1 (%4).
+func agentModel(t *testing.T) *Model {
+	t.Helper()
+	m := newTestModel(t)
+	now := time.Unix(10_000, 0)
+	clock = func() time.Time { return now }
+	t.Cleanup(func() { clock = time.Now })
+	m.Update(agentsMsg{map[string]*agent.Agent{
+		"%1": {Pane: "%1", Kind: agent.Claude, State: agent.Blocked, Since: now.Add(-2 * time.Minute),
+			Summary: "fix jwt expiry", Waiting: "Bash(go test ./...)", Hooked: true,
+			Events: []agent.Event{{T: now, Kind: "prompt", Detail: "fix jwt expiry"}, {T: now, Kind: "tool", Name: "Bash", Detail: "go test ./..."}}},
+		"%4": {Pane: "%4", Kind: agent.Codex, State: agent.Working, Since: now.Add(-40 * time.Second)},
+	}})
+	return m
+}
+
+func TestAgentsPageListsGroupedAgents(t *testing.T) {
+	m := agentModel(t)
+	m.Update(key("a"))
+	v := ansi.Strip(m.View())
+	for _, want := range []string{
+		"All 2", "Blocked 1", "Working 1", "Done 0",
+		"▾ api", "⣿1", "⣿ claude 2:claude", "blocked 2m", "fix jwt expiry · waiting: Bash(go test ./...)",
+		"▾ work", "⣾ codex 1:w", "working 40s",
+		"[2] Activity (claude@api:2)", "▸ prompt  fix jwt expiry", "⣿ Bash    go test ./...  pending",
+		"api:2.%1 · claude ", "⣿ blocked 2m ─╮",
+		"1 yes · 2 always · 3 no · i reply · x interrupt  │ enter jump · [ ] tabs · tab panel · a tmux",
+	} {
+		if !strings.Contains(v, want) {
+			t.Errorf("agents page missing %q:\n%s", want, v)
+		}
+	}
+	if strings.Index(v, "▾ api") > strings.Index(v, "▾ work") {
+		t.Error("the session with a blocked agent should come first")
+	}
+	if p := m.previewTarget(); p == nil || p.ID != "%1" {
+		t.Errorf("preview should show the selected agent's pane, got %v", p)
+	}
+
+	m.Update(key("]")) // Blocked tab
+	m.Update(key("]")) // Working tab
+	v = ansi.Strip(m.View())
+	if strings.Contains(v, "⣿ claude") || !strings.Contains(v, "⣾ codex") {
+		t.Errorf("Working tab should show only codex:\n%s", v)
+	}
+	if a, _ := m.curAgent(); a == nil || a.Pane != "%4" {
+		t.Errorf("selection should move to a visible agent, got %v", a)
+	}
+}
+
+func TestAgentsPageKeys(t *testing.T) {
+	m := agentModel(t)
+	m.Update(key("a"))
+	m.Update(key("j")) // codex is not blocked
+	if a, _ := m.curAgent(); a == nil || a.Pane != "%4" {
+		// rows: api header, claude, work header, codex; cursor starts on claude
+		m.Update(key("j"))
+	}
+	if a, _ := m.curAgent(); a == nil || a.Pane != "%4" {
+		t.Fatalf("cursor should be on codex, sel=%q", m.agentSel)
+	}
+	m.Update(key("1"))
+	if !m.toast.isErr || !strings.Contains(m.toast.text, "not waiting") {
+		t.Errorf("answering a working agent should explain, toast=%q", m.toast.text)
+	}
+	m.Update(key("B"))
+	if a, _ := m.curAgent(); a == nil || a.Pane != "%1" {
+		t.Errorf("B should select the blocked agent, sel=%q", m.agentSel)
+	}
+	if _, cmd := m.Update(key("1")); cmd == nil {
+		t.Error("1 on a blocked agent should send the answer")
+	}
+	m.Update(key("i"))
+	if d, ok := m.modal.(*inputModal); !ok || !strings.Contains(d.title, "Reply to claude") {
+		t.Fatalf("i should open the reply dialog, got %T", m.modal)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	m.Update(key("k")) // api header
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.collapsed["$0"] || strings.Contains(ansi.Strip(m.View()), "⣿ claude 2:claude") {
+		t.Errorf("enter on a header should fold the session")
+	}
+}
+
+func TestAgentBadgesOnTmuxPage(t *testing.T) {
+	m := agentModel(t)
+	v := ansi.Strip(m.View())
+	for _, want := range []string{"⣿1 2w", "⣾1 1w"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("tmux page missing badge %q:\n%s", want, v)
+		}
+	}
+	m.Update(key("3"))
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "⣾ working") {
+		t.Errorf("pane row should show the agent state:\n%s", v)
+	}
+}
+
+func TestSidebarCompactShowsAgents(t *testing.T) {
+	m := agentModel(t)
+	m.sidebar, m.selfPane = true, "%9"
+	m.Update(tea.WindowSizeMsg{Width: 30, Height: 40})
+	v := ansi.Strip(m.View())
+	for _, want := range []string{
+		"lazymux", "⣿1 ⣾1", // header counts
+		"▾ api", "2 claude", "⣿ 2m", // agent window: state + age
+		"─ agents", "⣿ claude", "api:2  2m", "fix jwt expiry · Bash(go t", // two-line entry
+		"⣾ codex", "work:1  40s",
+	} {
+		if !strings.Contains(v, want) {
+			t.Errorf("compact sidebar missing %q:\n%s", want, v)
+		}
+	}
+	if strings.Index(v, "⣿ claude") > strings.Index(v, "⣾ codex") {
+		t.Error("blocked agents should be listed first")
+	}
+}
+
+func TestLeftColumnIsCappedOnWideScreens(t *testing.T) {
+	m := agentModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 205, Height: 50})
+	for _, page := range []string{"tmux", "agents"} {
+		first := ansi.Strip(strings.SplitN(m.View(), "\n", 2)[0])
+		// the first box ends at its "╮"; the preview box starts right after
+		if w := strings.Index(first, "╮"); w < 0 || len([]rune(first[:w])) > maxAgentsLeftW {
+			t.Errorf("%s page: left column too wide on a 205-column screen:\n%s", page, first)
+		}
+		m.Update(key("a"))
 	}
 }

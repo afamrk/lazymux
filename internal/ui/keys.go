@@ -34,10 +34,11 @@ var bindings = []binding{
 	{"L", "cycle layout", "Sessions & windows", 0, "L", false},
 
 	{"[ / ]", "state tab (All / Blocked / Working / Done)", "Agents", 1, "", false},
-	{"1 / 2 / 3", "answer permission (yes / always / no)", "Agents", 1, "", true},
-	{"i", "reply to agent", "Agents", 1, "", true},
-	{"x", "interrupt (ctrl-c)", "Agents", 1, "", true},
-	{"B", "jump to next blocked", "Agents", 1, "", true},
+	{"enter", "jump to agent · fold session header", "Agents", 1, "", false},
+	{"1 / 2 / 3", "answer permission (yes / always / no)", "Agents", 1, "", false},
+	{"i", "reply to agent (types a line)", "Agents", 1, "", false},
+	{"x", "interrupt (esc; ctrl-c for aider)", "Agents", 1, "", false},
+	{"B", "jump to next blocked", "Agents", 1, "", false},
 	{"w", "new agent in git worktree", "Agents", 1, "", true},
 
 	{"space", "select / unselect item", "Selection", 1, " ", false},

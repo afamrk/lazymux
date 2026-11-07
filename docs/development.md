@@ -17,8 +17,9 @@ go test ./...
 
 | package | tests |
 | --- | --- |
+| `internal/agent` | `Classify` on idle / working / blocked screens of each agent (Claude Code screens captured from real sessions, a prompt high above the bottom ignored), finding agents in a process tree, hook JSON → events and log reset on a new session, `hooks install` / `uninstall` keeping user hooks, settings and the file mode, the detector's state history (working → done, aider's changing screen) and hook data (summary, waiting reason) |
 | `internal/tmux` | `ParseTree` on fixture lines (including a title with a tab), `TrimCapture`, `rerunCommand`, plus **integration tests** against private tmux servers: listing and capturing (`-L lazymux-test`), kill + restore of a window and a session (`-L lazymux-test-undo`), break-pane staying in its session (`-L lazymux-test-break`), sidebar toggle / follow / off with sidebar panes kept out of the tree (`-L lazymux-test-sidebar`, with a `sleep` standing in for the lazymux binary) |
-| `internal/ui` | the model driven with key messages on a fake tree: navigation cascade and multi-rune keys, the kill dialog defaulting to No, the help screen running a filtered row, `s` asking for one selected item, fuzzy matching, the `/` filter (typing, enter, esc), `space` + `v` range selection and the bulk kill dialog, the move picker targets, `ctrl+p` + `tab` selecting a window, fixed panel heights, preview skipping the own pane, the fzf pick filling the dialog, the Agents page toggle; sidebar mode: compact view (all sessions, scrolling to the current window, following the page), focus / blur switching to the full UI, `enter` not quitting |
+| `internal/ui` | the model driven with key messages on a fake tree: navigation cascade and multi-rune keys, the kill dialog defaulting to No, the help screen running a filtered row, `s` asking for one selected item, fuzzy matching, the `/` filter (typing, enter, esc), `space` + `v` range selection and the bulk kill dialog, the move picker targets, `ctrl+p` + `tab` selecting a window, fixed panel heights, preview skipping the own pane, the fzf pick filling the dialog, the Agents page (grouping, blocked first, tabs, summary and waiting lines, Activity with the pending call, answer / reply / `B` / folding keys, badges on the tmux page); sidebar mode: compact view (all sessions, scrolling to the current window, following the page), focus / blur switching to the full UI, `enter` not quitting |
 
 The integration tests start servers with `-f /dev/null` (so your `~/.tmux.conf` is not loaded) and kill them at the end. They are skipped when `tmux` is not installed.
 
@@ -85,6 +86,19 @@ T new-session -d -s ui "/tmp/lazymux -L lzdemo --client $TTY"
 T send-keys -t ui g Enter
 T list-clients -F '#{client_tty} #{session_name}'   # the client is now on the picked session
 ```
+
+### Agents without spending tokens
+
+Real agents need a login and a prompt to reach a permission dialog. A fake is enough to test detection and the answer keys: a small compiled program named `claude` (tmux reports the process name, so a shell script would show up as `bash`) that prints a permission prompt, waits for a key, then prints a spinner line and finally an idle prompt. Hook events can be fed by hand; point `LAZYMUX_EVENTS` at a scratch directory so `~/.cache` is not touched:
+
+```sh
+export LAZYMUX_EVENTS=/tmp/lzevents
+T set-environment -g LAZYMUX_EVENTS /tmp/lzevents      # for the sidebar started by tmux
+echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"go test ./..."}}' |
+  TMUX="$(T display -p '#{socket_path}'),0,0" TMUX_PANE=%1 /tmp/lazymux hook
+```
+
+`lazymux hooks install /tmp/settings.json` tries the installer on a copy instead of your real Claude Code settings.
 
 ## Conventions
 

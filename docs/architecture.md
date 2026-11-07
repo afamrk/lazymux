@@ -3,18 +3,20 @@
 lazymux is a single Go binary, normally running as a sidebar pane in each session (see [Sidebar](#sidebar)). It never keeps tmux state of its own: every second it asks tmux for the full session/window/pane tree, and every action is a plain `tmux` command.
 
 ```
-cmd/lazymux/main.go        flags; `sidebar [toggle|off|follow]` subcommands; starts the Bubble Tea program (sidebar or full screen); execs `tmux attach` when outside tmux
+cmd/lazymux/main.go        flags; `sidebar [toggle|off|follow]`, `hook`, `hooks [install|uninstall|status]` subcommands; starts the Bubble Tea program (sidebar or full screen); execs `tmux attach` when outside tmux
 internal/tmux/             everything that talks to tmux
   client.go                Client{Socket, ClientTTY}; Run(args…) execs `tmux [-L socket] args…`
   tree.go                  Session / Window / Pane types; ListTree (one list-panes call) + ParseTree
   actions.go               capture, switch, new, rename, kill, move, swap, break, zoom, layout, send-keys
   snapshot.go              undo: Snap{Session,Window,Pane} before a kill, Restore after
   sidebar.go               sidebar panes: toggle, follow / re-dock, off, hooks, focus and size queries
+internal/agent/            agent detection: agent.go (types, keys per agent), procs.go (process tree),
+                           screen.go (Classify), hooks.go (hook events, install), detector.go
 internal/ui/               the terminal UI (Bubble Tea model)
   app.go                   Model: selection, focus, refresh loop, key routing, layout and panel rendering
   actions.go               what each action key does: dialogs, bulk kill, toasts, undo stack
   sidebar.go               sidebar mode: focus handling, width changes, compact view
-  agents.go                the Agents page: page switch (`a`), state tabs, its panels and keys
+  agents.go                the Agents page: agent list, Activity, keys (answer, reply, interrupt), badges for other views
   selection.go             per-panel filters (/) and visible lists, multi-selection (space / v), action targets
   picker.go                fuzzy picker dialog: move target (m), jump anywhere (ctrl+p); swap
   fuzzy.go                 fuzzy matcher (subsequence + bonuses) and match highlighting
@@ -57,9 +59,9 @@ internal/ui/               the terminal UI (Bubble Tea model)
 
 **Layout** (`View`, `panelHeights`):
 
-- left column = 30% of the width, at least 32 columns, leaving at least 30 for the preview; below 64 columns the preview is dropped
+- left column = 30% of the width (45% in the sidebar), at least 32 and at most 60 columns (64 on the Agents page), leaving at least 30 for the preview; on wide screens the extra width goes to the preview; below 64 columns the preview is dropped
 - panel heights do not depend on focus: each panel wants `items + 2` rows, the body is shared by water-filling (a panel needing less than an equal share keeps only that, the rest is split among the others), spare rows are handed out so the column stays full, minimum 3 rows
-- the Agents page (`page == pageAgents`) has its own layout: list + Activity (`clamp(bodyH/3, 3, 8)` rows) and a 36% left column
+- the Agents page (`page == pageAgents`) has its own layout: list + Activity (`clamp(bodyH/3, 3, 10)` rows) and a 36% left column
 - the preview never captures lazymux's own pane when a session or window is selected: `previewTarget` substitutes the window's last pane (`#{pane_last}`) or the session's last window (`#{window_last_flag}`)
 
 **Rows** are built from segments (`seg{text, style}`) by `renderRow`, which right-aligns the meta part, truncates the left part with `…`, and applies the selection background to every segment. That is needed because an inner ANSI reset would otherwise end the background.
@@ -113,17 +115,26 @@ client-session-changed[90]  run-shell -b "lazymux sidebar follow '#{session_id}'
 
 Inside the sidebar the program runs with `tea.WithReportFocus()`. `FocusMsg` / `BlurMsg` resize the pane to 60% of the window or back to 30 columns. Each tick also asks tmux (`SidebarState`) whether the pane is active in the active window of an attached session, what its width is, and whether it is docked. That covers missing focus events, fixes a stale width after a move, and re-docks after layout changes. `View` renders `viewCompact` while unfocused or narrower than 50 columns; otherwise it renders the normal UI with the panel column at 45% of the pane.
 
-## Planned: agent detection (P3)
+## Agent detection
 
-Agents will be found through an interface so both approaches can plug in:
+`internal/agent` finds agents by scraping, and adds hook data where it exists. Both feed one `Agent{Pane, Kind, State, Since, Worked, Summary, Waiting, Hooked, Events}`.
 
-```go
-type Detector interface {
-	Detect(tree *tmux.Tree) []Agent // Agent{PaneID, Kind, State, Summary, Since, …}
-}
+```
+tick ──► detectAgents (one at a time) ──► Detector.Detect(tree) ──► agentsMsg ──► Model.agents[paneID]
+                                             │
+              ┌──────────────────────────────┼───────────────────────────────┐
+              ▼                              ▼                               ▼
+   kind: pane_current_command      state: capture-pane -p           hooks: ~/.cache/lazymux/events/
+   (claude, codex…), or `ps`       (plain text) → Classify          <server>-<pane>.jsonl, re-read
+   descendants of pane_pid when    bottom 30 lines: prompt?         when its mtime / size changes
+   the command is node/python/…    interrupt hint? spinner?
 ```
 
-- **Scraping**: walk each pane's process tree for known agent binaries, and infer the state from the screen and `#{pane_title}` (Claude Code puts a task summary in its terminal title). It needs no setup.
-- **Hooks**: agents report events (prompt, tool calls, permission requests) that lazymux reads. That gives richer data (the Activity timeline, the waiting reason) but needs setup per agent.
+- **Kind.** `KindOf(pane_current_command)` covers native binaries. Only panes running an interpreter (`node`, `python*`, `bun`, `deno`, a version-number name) cost a `ps -axo pid,ppid,args` call, done at most once per detection; the pane's process tree is searched for an agent script (`@google/gemini-cli`, `@openai/codex`, a `claude` / `aider` basename…).
+- **State.** `Classify(kind, screen)` looks only at the last 30 non-blank lines. Blocked: a selected first option (`❯ 1. Yes`, `› 1. Yes, proceed`, `● 1. Allow once`) within the last 15 lines; opencode's "Allow once"; aider's `(Y)es/(N)o` on the last line. Working: an interrupt hint (`esc to interrupt`, `esc to cancel`) in the last 10 lines, or Claude Code's spinner line `✽ Word… (`. Otherwise idle. For aider, which has neither, a screen that changed within 3 seconds counts as working. Non-breaking spaces (Claude's prompt uses them) are normalized first.
+- **History.** The detector keeps a `track` per pane: the last screen, when it changed, the state and since when. `Since` changes only with the state; `Worked` turns an idle agent into "done". Tracks of panes that no longer run an agent are dropped.
+- **Summary and waiting reason.** Summary: the last hook prompt, else Claude Code's terminal title (`✳ Fix JWT expiry`, minus the glyph; the hostname default is ignored). Waiting: the pending hook tool call (`Bash(go test ./...)`, the last `tool` event with only notifications after it), else the tool header and the line under it on the screen (`Bash command: go test ./...`).
+- **Hooks.** `lazymux hook` reads Claude Code's hook JSON on stdin and appends a compact event (`{"t","k","n","d"}`, kinds start / prompt / tool / notify / stop / end) to the log named after `$TMUX`'s socket and `$TMUX_PANE`. `start` truncates the log; it is cut back to 200 events when it grows. A log ending in `end` is ignored. `lazymux hooks install` edits the settings JSON generically (`map[string]any`), adding one group per event and recognizing its own entries by a command that contains `lazymux` and ends in ` hook`, so reinstalling replaces them and uninstall removes only them. Note that Go re-sorts the keys of the file.
+- **Actions** are plain `send-keys`: `AnswerKeys(kind, n)` per agent, `Interrupt(kind)` (`Escape`, or `C-c` for aider), and `SendLine` for replies.
 
-Which to build first is an open decision; see [roadmap.md](roadmap.md#open-decisions).
+In the UI, `agentRows()` builds the list for the current tab (session headers + agents, blocked sessions first, folded sessions as headers only). The selection is a pane id or `s:<session id>`, so it survives refreshes like the tmux page selection. On the Agents page `previewTarget` returns the selected agent's pane, so the normal preview capture serves both pages.

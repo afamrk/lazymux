@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/afamrk/lazymux/internal/agent"
 	"github.com/afamrk/lazymux/internal/tmux"
 )
 
@@ -23,6 +24,12 @@ const (
 )
 
 const refreshEvery = time.Second
+
+// Widest left column: the tmux page's panels and the Agents page's list.
+const (
+	maxLeftW       = 60
+	maxAgentsLeftW = 64
+)
 
 // Model is the root Bubble Tea model.
 type Model struct {
@@ -38,7 +45,15 @@ type Model struct {
 
 	agentTab   int // All / Blocked / Working / Done
 	agentFocus int // agent list or Activity
-	off        [numPanels]int
+
+	det       *agent.Detector
+	agents    map[string]*agent.Agent // detected agents by pane id
+	detecting bool                    // a detection is running
+	agentSel  string                  // selected agent row: pane id, or "s:<session id>" for a header
+	collapsed map[string]bool         // session ids folded in the agent list
+	agentOff  int                     // agent list scroll (lines)
+	actOff    int                     // Activity scroll from the bottom (events)
+	off       [numPanels]int
 
 	preview    string
 	previewFor string
@@ -74,7 +89,8 @@ type Model struct {
 // session/window/pane, when known.
 func New(c *tmux.Client) *Model {
 	s, w, p := c.Current()
-	return &Model{c: c, selSess: s, selWin: w, selPane: p, selfPane: os.Getenv("TMUX_PANE")}
+	return &Model{c: c, selSess: s, selWin: w, selPane: p, selfPane: os.Getenv("TMUX_PANE"),
+		det: agent.NewDetector(c), collapsed: map[string]bool{}}
 }
 
 type (
@@ -125,6 +141,10 @@ func (m *Model) fetchPreview() tea.Cmd {
 // another pane of the window, or the active pane of the session's last (or
 // another) window. Nil means there is nothing else to show.
 func (m *Model) previewTarget() *tmux.Pane {
+	if m.page == pageAgents {
+		_, p := m.curAgent()
+		return p
+	}
 	_, _, _, _, p, _ := m.cur()
 	if p == nil || p.ID != m.selfPane || m.focus == panelPanes {
 		return p
@@ -309,7 +329,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		return m, tea.Batch(m.fetchTree(), m.fetchPreview(), m.checkFocus(), tick())
+		return m, tea.Batch(m.fetchTree(), m.fetchPreview(), m.detectAgents(), m.checkFocus(), tick())
+
+	case agentsMsg:
+		return m, m.setAgents(msg.agents)
 
 	case tea.FocusMsg:
 		return m, m.setFocused(true, 0)
@@ -405,8 +428,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.page == pageAgents {
-		m.handleAgentKey(k.String())
-		return m, nil
+		_, cmd := m.handleAgentKey(k.String())
+		return m, cmd
 	}
 	prevPane, prevTarget := m.selPane, ""
 	if t := m.previewTarget(); t != nil {
@@ -508,7 +531,9 @@ func (m *Model) View() string {
 	if m.sidebar { // the pane is already narrow: give the panels more of it
 		leftPct = 45
 	}
-	leftW := clamp(m.w*leftPct/100, 32, m.w-30)
+	// the panels need ~60 columns at most; on wide screens the rest goes to
+	// the preview (as in the mockups)
+	leftW := clamp(min(m.w*leftPct/100, maxLeftW), 32, m.w-30)
 	if m.w < 64 { // too narrow for a preview
 		leftW = m.w
 	}
@@ -517,7 +542,7 @@ func (m *Model) View() string {
 	if m.page == pageAgents {
 		// agent rows carry a summary line, so this page's list is wider
 		if leftW < m.w {
-			leftW = max(leftW, clamp(m.w*36/100, min(46, m.w-30), m.w-30))
+			leftW = max(leftW, clamp(min(m.w*36/100, maxAgentsLeftW), min(46, m.w-30), m.w-30))
 		}
 		left = m.viewAgentsLeft(leftW, bodyH)
 	} else {
@@ -722,7 +747,7 @@ func (m *Model) sessionRow(s *tmux.Session, w, sel int) string {
 	}
 	_, idx := m.matchSession(s)
 	left := append([]seg{m.markSeg(panelSessions, s.ID), mark}, hlSegs(s.Name, idx, m.textStyle(panelSessions), stMatch)...)
-	right := []seg{{fmt.Sprintf("%dw ", len(s.Windows)), stFaint}}
+	right := append(m.sessionBadge(s), seg{fmt.Sprintf("%dw ", len(s.Windows)), stFaint})
 	return renderRow(left, right, w, sel)
 }
 
@@ -730,7 +755,7 @@ func (m *Model) windowRow(win *tmux.Window, w, sel int) string {
 	_, idx := m.matchWindow(win)
 	left := append([]seg{m.markSeg(panelWindows, win.ID), {fmt.Sprintf("%d ", win.Index), stBlue}},
 		hlSegs(win.Name, idx, m.textStyle(panelWindows), stMatch)...)
-	var right []seg
+	right := m.windowBadge(win)
 	if n := len(win.Panes); n > 1 {
 		right = append(right, seg{fmt.Sprintf("%dp ", n), stFaint})
 	}
@@ -750,7 +775,11 @@ func (m *Model) paneRow(p *tmux.Pane, w, sel int) string {
 	_, idx := m.matchPane(p)
 	left := append([]seg{m.markSeg(panelPanes, p.ID), {p.ID + " ", stPeach}},
 		hlSegs(p.Command, idx, m.textStyle(panelPanes), stMatch)...)
-	right := []seg{{fmt.Sprintf("%dx%d", p.Width, p.Height), stFaint}}
+	var right []seg
+	if a := m.agents[p.ID]; a != nil {
+		right = append(right, seg{stateGlyph(a.State) + " " + a.Label() + " ", stateStyle(a.State)})
+	}
+	right = append(right, seg{fmt.Sprintf("%dx%d", p.Width, p.Height), stFaint})
 	if p.Active {
 		right = append(right, seg{" *", stMauve})
 	} else {
@@ -831,7 +860,7 @@ func (m *Model) viewBar() string {
 	}
 	keys = append(keys, kd{"a", "agents"}, kd{"?", "help"}, last)
 	if m.page == pageAgents {
-		keys = []kd{{"[ ]", "tabs"}, {"tab", "panel"}, {"a", "tmux"}, {"?", "help"}, last}
+		keys = m.agentBar(last)
 	}
 	return m.renderBar(keys)
 }
@@ -853,6 +882,11 @@ func (m *Model) renderBar(keys []kd) string {
 		part := ks.Render(x.k) + " " + stSub.Render(x.d)
 		if i > 0 {
 			part = stFaint.Render(" · ") + part
+		}
+		if x.k == "│" { // a group divider
+			part = stFaint.Render("  │ ")
+		} else if i > 0 && keys[i-1].k == "│" {
+			part = ks.Render(x.k) + " " + stSub.Render(x.d)
 		}
 		if ansi.StringWidth(left+part)+1 > avail {
 			break // drop what does not fit; ? help lists everything
