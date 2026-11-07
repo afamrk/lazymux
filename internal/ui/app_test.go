@@ -273,8 +273,8 @@ func TestAgentsPageToggle(t *testing.T) {
 			t.Errorf("agents page missing %q", want)
 		}
 	}
-	m.Update(key("n"))
 	m.Update(key("d"))
+	m.Update(key("r"))
 	if m.modal != nil {
 		t.Fatal("tmux actions must not run on the agents page")
 	}
@@ -598,5 +598,57 @@ func TestFindListsAgents(t *testing.T) {
 	p = m.modal.(*pickerModal)
 	if !p.items[0].agent || p.items[0].pane != "%1" {
 		t.Errorf("first item = %+v", p.items[0])
+	}
+}
+
+func TestNewAgentDialog(t *testing.T) {
+	m := agentModel(t)
+	old := installedAgents
+	installedAgents = func() []string { return []string{"claude", "codex"} }
+	t.Cleanup(func() { installedAgents = old })
+	m.Update(key("a"))
+	m.Update(key("n"))
+	d, ok := m.modal.(*inputModal)
+	if !ok {
+		t.Fatalf("n should open the new agent dialog, modal = %T", m.modal)
+	}
+	v := ansi.Strip(m.View())
+	for _, want := range []string{"New agent in api", "agent:", "● claude", "○ codex"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("dialog missing %q:\n%s", want, v)
+		}
+	}
+	if d.focus != len(d.fields) {
+		t.Error("the dialog should start on the agent choice")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	if d.radioSel != 1 {
+		t.Errorf("right should pick codex, radioSel = %d", d.radioSel)
+	}
+	// once the started agent is detected, it is selected
+	m.Update(actionMsg{selAgent: "%9"})
+	m.Update(agentsMsg{map[string]*agent.Agent{"%9": {Pane: "%9", Kind: agent.Codex}, "%1": m.agents["%1"]}})
+	if m.agentSel != "%9" && m.pendingAgent != "%9" {
+		t.Errorf("new agent not selected: sel %q pending %q", m.agentSel, m.pendingAgent)
+	}
+}
+
+func TestProjectPicker(t *testing.T) {
+	m := newTestModel(t)
+	m.Update(projectsMsg{[]string{"/home/u/project/api", "/home/u/project/lazy.mux"}})
+	p, ok := m.modal.(*pickerModal)
+	if !ok {
+		t.Fatalf("modal = %T", m.modal)
+	}
+	if p.items[0].sess == "" || !strings.Contains(p.items[0].detail, "session api") {
+		t.Errorf("api has a session: %+v", p.items[0])
+	}
+	if p.items[1].sess != "" {
+		t.Errorf("lazy.mux has none: %+v", p.items[1])
+	}
+	m.modal = nil
+	m.Update(projectsMsg{nil})
+	if m.modal != nil || !strings.Contains(m.toast.text, "no projects") {
+		t.Errorf("empty list should toast, got %q", m.toast.text)
 	}
 }

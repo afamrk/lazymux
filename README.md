@@ -46,9 +46,9 @@ Focused (60% of the window):
 | P1 | New / rename / kill + undo / move / swap / break / zoom / layout, dialogs, help | ✅ done |
 | Sidebar | Docked left pane that follows you; compact when unfocused, full UI at 60% when focused | ✅ done |
 | P2 | `/` filter, multi-select + bulk kill / move, jump anywhere (`f`) | ✅ done |
-| P3 | Agents page (`a`): agents grouped by session under All / Blocked / Working / Done tabs, answer / reply / interrupt, Activity timeline from agent hooks hooks | ✅ done |
+| P3 | Agents page (`a`): agents grouped by session under All / Blocked / Working / Done tabs, answer / reply / interrupt, Activity timeline from agent hooks | ✅ done |
 | P4 | Notifications (desktop / terminal / tmux, sounds) on blocked and done, `lazymux status` for the tmux status line, done = unseen | ✅ done |
-| P5 | Project picker (sessionizer), git worktree + agent spawn | planned |
+| P5 | Project picker (`N`), start a new agent (`n` on the Agents page) | ✅ done |
 
 See [docs/roadmap.md](docs/roadmap.md) for details and open decisions.
 

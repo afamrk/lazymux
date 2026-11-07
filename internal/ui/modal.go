@@ -38,13 +38,14 @@ type field struct {
 }
 
 type inputModal struct {
-	title    string
-	fields   []field
-	radio    []string // optional choice row, e.g. new session / new window
-	radioSel int
-	focus    int // index into fields, len(fields) = radio row
-	verb     string
-	onSubmit func(vals []string, radio int) tea.Cmd
+	title      string
+	fields     []field
+	radio      []string // optional choice row, e.g. new session / new window
+	radioLabel string   // label of the choice row (default "start in:")
+	radioSel   int
+	focus      int // index into fields, len(fields) = radio row
+	verb       string
+	onSubmit   func(vals []string, radio int) tea.Cmd
 }
 
 func newField(label, value string, dir bool) field {
@@ -154,7 +155,11 @@ func (d *inputModal) view(maxW, maxH int) string {
 		lines = append(lines, " "+label+f.in.View()+hint)
 	}
 	if d.radio != nil {
-		row := " " + stSub.Render("start in:") + "  "
+		label := d.radioLabel
+		if label == "" {
+			label = "start in:"
+		}
+		row := " " + stSub.Render(label) + "  "
 		for i, o := range d.radio {
 			dot, st := "○ ", stFaint
 			if i == d.radioSel {

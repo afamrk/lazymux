@@ -139,7 +139,14 @@ func (m *Model) setAgents(a map[string]*agent.Agent) tea.Cmd {
 		prev = t.ID
 	}
 	m.agents = a
+	if m.pendingAgent != "" && a[m.pendingAgent] != nil {
+		m.agentSel = m.pendingAgent
+		m.agentTab, m.agentFilter = agentAll, ""
+	}
 	m.normalizeAgents()
+	if m.agentSel == m.pendingAgent { // listed (its pane is in the tree too)
+		m.pendingAgent = ""
+	}
 	m.markSeen()
 	if t := m.previewTarget(); t != nil && t.ID != prev {
 		return m.fetchPreview()
@@ -426,6 +433,8 @@ func (m *Model) handleAgentKey(k string) (bool, tea.Cmd) {
 	case "/":
 		m.agentFocus = agentPanelList
 		m.startFilter()
+	case "n":
+		return true, m.newAgentCmd()
 	case "g", "home":
 		m.moveAgent(-1 << 20)
 	case "G", "end":
@@ -725,8 +734,8 @@ func (m *Model) agentsEmpty() []string {
 		"",
 		" " + stSub.Render("No agents running."),
 		"",
-		" " + stFaint.Render("Start claude, codex, gemini, opencode"),
-		" " + stFaint.Render("or aider in any pane. Press ") + stKey.Render("a") + stFaint.Render(" for tmux."),
+		" " + stFaint.Render("Press ") + stKey.Render("n") + stFaint.Render(" to start one, or run claude, codex,"),
+		" " + stFaint.Render("agy, opencode or aider in any pane."),
 	}
 }
 

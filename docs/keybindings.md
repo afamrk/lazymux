@@ -59,8 +59,7 @@ These work on the Agents page (`a` switches pages). There, `tab` / `h` / `l` swi
 | `i` | type a reply and send it to the agent | ✅ |
 | `x` | interrupt the agent (`esc`; `ctrl-c` for aider) | ✅ |
 | `B` | jump to the next blocked agent | ✅ |
-| `n` (Agents page) | start a new agent | 🔜 P5 |
-| `w` | new git worktree + window + agent | 🔜 P5 |
+| `n` (Agents page) | start a new agent in a new window (pick the agent and directory) | ✅ |
 
 ## Global
 
@@ -71,7 +70,7 @@ These work on the Agents page (`a` switches pages). There, `tab` / `h` / `l` swi
 | `esc` | sidebar: back to your pane (clears the selection, then the filter first) | ✅ |
 | `Q` | sidebar: turn sidebars off everywhere | ✅ |
 | `prefix` + `b` | tmux binding: turn the sidebar on / off (`lazymux sidebar toggle`) | ✅ |
-| `N` | open a project (sessionizer) | 🔜 P5 |
+| `N` | open a project: zoxide directories and git repos; switches to its session or creates it | ✅ |
 
 ## Inside dialogs
 

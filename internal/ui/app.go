@@ -75,10 +75,11 @@ type Model struct {
 	toastSeq int
 	undo     [][]*tmux.Snapshot // undo steps (one per kill, possibly several items), most recent last
 
-	filter      [numPanels]string // per-panel filter (/)
-	filtering   bool              // the filter input of the focused panel has the keys
-	filterIn    textinput.Model
-	agentFilter string // Agents page filter (/)
+	filter       [numPanels]string // per-panel filter (/)
+	filtering    bool              // the filter input of the focused panel has the keys
+	filterIn     textinput.Model
+	agentFilter  string // Agents page filter (/)
+	pendingAgent string // a just-started agent to select once detected
 
 	selected []selRef // multi-selection (space / v), all in one panel
 	anchor   string   // id of the last item toggled with space (start of a v range)
@@ -358,6 +359,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case actionMsg:
 		return m, m.handleAction(msg)
 
+	case projectsMsg:
+		m.toast = toastState{}
+		return m, m.openProjects(msg.dirs)
+
+	case projectOpenedMsg:
+		return m, tea.Batch(m.fetchTree(), m.projectOpened(msg))
+
 	case dirPickedMsg:
 		if msg.err != nil {
 			return m, m.setToast("✗ fzf: "+msg.err.Error(), true)
@@ -432,6 +440,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "f", "ctrl+p":
 		m.openJump()
 		return m, nil
+	case "N":
+		return m, m.loadProjects()
 	case "?":
 		m.openHelp()
 		return m, nil

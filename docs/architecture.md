@@ -14,12 +14,14 @@ internal/agent/            agent detection: agent.go (types, keys per agent), pr
                            screen.go (Classify), rules.go + rules/*.toml (detection rules), hooks.go (hook events, install), detector.go,
                            notify.go (Notifier, Config from tmux options, delivery, sounds),
                            leader.go (lock-file leader, status summary for `lazymux status`)
+internal/project/          project directories for N: zoxide, git repos under roots (fd or a walk)
 internal/ui/               the terminal UI (Bubble Tea model)
   app.go                   Model: selection, focus, refresh loop, key routing, layout and panel rendering
   actions.go               what each action key does: dialogs, bulk kill, toasts, undo stack
   sidebar.go               sidebar mode: focus handling, width changes, compact view
   agents.go                the Agents page: agent list, Activity, keys (answer, reply, interrupt), badges for other views
   selection.go             per-panel filters (/) and visible lists, multi-selection (space / v), action targets
+  projects.go              project picker (N), new agent dialog (n)
   picker.go                fuzzy picker dialog: move target (m), jump anywhere (f, agents included); swap
   fuzzy.go                 fuzzy matcher (subsequence + bonuses) and match highlighting
   fzf.go                   ctrl+f directory picker in dialogs (fzf over zoxide + fd)

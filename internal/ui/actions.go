@@ -20,6 +20,7 @@ type actionMsg struct {
 	clearSel               bool
 	undo                   []*tmux.Snapshot // pushed as one undo step on success (kills)
 	popUndo                bool             // undo applied: drop the step
+	selAgent               string           // select this agent pane on the Agents page once it is detected
 }
 
 type toastState struct {
@@ -54,6 +55,9 @@ func (m *Model) handleAction(msg actionMsg) tea.Cmd {
 	}
 	if msg.clearSel {
 		m.selected = nil
+	}
+	if msg.selAgent != "" {
+		m.pendingAgent = msg.selAgent
 	}
 	if len(msg.undo) > 0 {
 		m.undo = append(m.undo, msg.undo)

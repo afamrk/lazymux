@@ -174,6 +174,18 @@ Undo keeps the last 20 kills, most recent first, but only while lazymux is runni
 - `enter` goes there (switches, like `enter` in the panels).
 - `tab` only selects it in the panels, so you can act on it (kill, move…) without switching.
 
+## Projects
+
+**`N` (open project)** lists your project directories: zoxide's (most used first), then the git repositories under your project folders. Picking one switches to the session named after the directory (`~/project/lazy.mux` → `lazy_mux`), or creates that session in the directory first. Projects with a session are marked `● session <name>`.
+
+```tmux
+set -g @lazymux-project-roots '~/project,~/work'   # where git repos are searched (default: ~/project ~/projects ~/src ~/code ~/work ~/dev)
+set -g @lazymux-project-depth 3                    # how deep under a root
+set -g @lazymux-project-zoxide off                 # leave zoxide's directories out
+```
+
+Repositories are found with `fd` when it is installed, otherwise by walking the folders (skipping hidden folders and `node_modules`).
+
 ## Selecting, moving and swapping
 
 **`space`** selects the item under the cursor: it gets a mauve `◆` and the panel's border shows `3 of 6 · 2 selected`. Press `space` again to unselect. All selected items are in one panel; selecting in another panel starts over.
@@ -280,6 +292,7 @@ A rule matches when all of its conditions hold: `contains` (every text, case-ins
 | `i` | type a reply; it is sent to the agent's pane followed by `enter` |
 | `x` | interrupt the current turn (`esc`; `ctrl-c` for aider) |
 | `B` | select the next blocked agent (switches to the All tab and unfolds sessions when needed) |
+| `n` | start a new agent: pick one of the agents installed in `$PATH` and a directory (the selected agent's); it starts in a new window of the selected session, typed into the window's shell so the window stays when the agent exits |
 | `enter` | go to the agent's pane |
 
 The keys sent per agent: Claude Code and agy get the digit, Gemini CLI too (its "no" is `esc`), Codex gets `y` / `a` / `esc`, opencode `enter` / `a` / `esc`, aider `y` / `a` / `n` and `enter`. Look at the preview before answering: the key goes straight to the agent.

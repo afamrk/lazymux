@@ -24,7 +24,8 @@ type pickItem struct {
 	sess   string // target ids
 	win    string
 	pane   string
-	agent  bool // an agent row of jump anywhere (pane is its pane)
+	agent  bool   // an agent row of jump anywhere (pane is its pane)
+	value  string // free payload, e.g. the project picker's directory
 }
 
 type pickHit struct {

@@ -40,14 +40,14 @@ var bindings = []binding{
 	{"i", "reply to agent (types a line)", "Agents", 1, "", false},
 	{"x", "interrupt (esc; ctrl-c for aider)", "Agents", 1, "", false},
 	{"B", "jump to next blocked", "Agents", 1, "", false},
-	{"w", "new agent in git worktree", "Agents", 1, "", true},
+	{"n", "start a new agent (in a new window)", "Agents", 1, "", false},
 
 	{"space", "select / unselect item", "Selection", 1, " ", false},
 	{"v", "select range (from last space)", "Selection", 1, "v", false},
 	{"esc", "clear selection, then filter", "Selection", 1, "", false},
 
 	{"a", "switch page (tmux ⇄ agents)", "Global", 1, "a", false},
-	{"N", "open project (sessionizer)", "Global", 1, "", true},
+	{"N", "open project (zoxide, git repos)", "Global", 1, "N", false},
 	{"?", "this help", "Global", 1, "", false},
 	{"q", "quit (sidebar: back to your pane)", "Global", 1, "q", false},
 	{"Q", "turn the sidebar off", "Global", 1, "Q", false},

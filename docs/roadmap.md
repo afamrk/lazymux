@@ -37,10 +37,9 @@ New session / window / pane (with an fzf directory picker), rename, kill with a 
 - Claude Code's spinning terminal title counts as working
 - `lazymux rules`, `lazymux rules explain <pane>`, `lazymux rules show <agent>`
 
-### P5: projects and worktrees
-- `N`: fuzzy project picker (zoxide → fd → configured roots), creates or attaches a session named after the directory
-- `n` on the Agents page: start a new agent (moved here from P3: it belongs with the project / worktree flow)
-- `w`: create a git worktree, open a window in it, and start the configured agent; `X` tears down window, worktree and branch (with a confirm)
+### ✅ P5: projects and new agents
+- `N`: fuzzy project picker (zoxide's directories, then git repositories under `@lazymux-project-roots` found with `fd` or a walk); switches to the session named after the directory, or creates it there
+- `n` on the Agents page: start an installed agent in a new window of the selected session, in the selected agent's directory; selected once detected
 
 ## Open decisions
 
