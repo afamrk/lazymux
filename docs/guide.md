@@ -10,6 +10,7 @@
 - [Selecting, moving and swapping](#selecting-moving-and-swapping)
 - [Pane and window tools](#pane-and-window-tools)
 - [Agents](#agents)
+- [Notifications and status line](#notifications-and-status-line)
 - [Help screen](#help-screen)
 - [Command-line flags](#command-line-flags)
 
@@ -204,7 +205,7 @@ These need a window with at least two panes; otherwise a toast explains why noth
 
 ## Agents
 
-lazymux finds AI coding agents in every pane: **Claude Code, Codex, Gemini CLI, opencode and aider**. Nothing needs to be set up.
+lazymux finds AI coding agents in every pane: **Claude Code, Codex, agy (Antigravity CLI), opencode and aider** (and Gemini CLI, which agy replaces). Nothing needs to be set up.
 
 **How it knows.** A pane runs an agent when its command is the agent (`claude`, `codex`…), or when a `node` / `python` / `bun` process in it runs one (npm installs of Gemini CLI and Codex). The state is read from the bottom of the agent's screen every second:
 
@@ -212,7 +213,10 @@ lazymux finds AI coding agents in every pane: **Claude Code, Codex, Gemini CLI, 
 | --- | --- | --- |
 | **blocked** | `⣿` red | a permission prompt with a selected first option (`❯ 1. Yes`, `› 1. Yes, proceed`, `● 1. Allow once`); aider's `(Y)es/(N)o` question |
 | **working** | `⣾` yellow | `esc to interrupt` / `esc to cancel` in the status line, or Claude Code's spinner line (`✽ Thinking… (12s · ↓ 1k tokens)`); for aider, a screen that changed in the last 3 seconds |
-| **done** / idle | `●` green | neither: waiting for a prompt. It says **done** once the agent has worked, **idle** before that |
+| **done** | `●` green | neither (waiting for a prompt), and it finished while you were not looking at its window |
+| **idle** | `○` dim | waiting for a prompt, and you have seen it: its window was on screen, or you selected it on the Agents page |
+
+**Done or idle** works like herdr: an agent that finishes in the window you are looking at becomes idle right away; one that finishes elsewhere stays done until you go to its window (or select it on the Agents page), so `●` always means "finished, not checked yet". The Done tab lists both.
 
 The time next to the state (`blocked 2m`) is how long it has been in that state. Only the bottom of the screen counts, so the same words inside the conversation do not fool it.
 
@@ -254,19 +258,60 @@ The time next to the state (`blocked 2m`) is how long it has been in that state.
 | `B` | select the next blocked agent (switches to the All tab and unfolds sessions when needed) |
 | `enter` | go to the agent's pane |
 
-The keys sent per agent: Claude Code and Gemini CLI get the digit (Gemini's "no" is `esc`), Codex gets `y` / `a` / `esc`, opencode `enter` / `a` / `esc`, aider `y` / `a` / `n` and `enter`. Look at the preview before answering: the key goes straight to the agent.
+The keys sent per agent: Claude Code and agy get the digit, Gemini CLI too (its "no" is `esc`), Codex gets `y` / `a` / `esc`, opencode `enter` / `a` / `esc`, aider `y` / `a` / `n` and `enter`. Look at the preview before answering: the key goes straight to the agent.
 
 Killing a pane, window or session with an agent in it adds `⣿ ends agents: claude 3:claude (blocked)` to the confirm dialog.
 
-**Claude Code hooks (optional).** Without hooks, lazymux knows the state but not the story. With them, Claude Code reports each prompt, tool call and notification to lazymux as it happens:
+**Hooks (optional).** Without hooks, lazymux knows the state but not the story. With them, each agent reports its prompts, tool calls and permission requests to lazymux as they happen:
 
 ```sh
-lazymux hooks install      # edits ~/.claude/settings.json, keeps settings.json.lazymux.bak
+lazymux hooks install            # every installed agent
+lazymux hooks install codex agy  # only these
 lazymux hooks status
-lazymux hooks uninstall    # removes only lazymux's entries
+lazymux hooks uninstall          # removes only lazymux's entries
 ```
 
-`install` adds `lazymux hook` to the `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Notification`, `Stop` and `SessionEnd` hooks, next to any hooks you already have. Restart running Claude Code sessions to pick them up. Give a path to use another settings file (`lazymux hooks install .claude/settings.json`); `$CLAUDE_CONFIG_DIR` is respected. The hook writes one line per event to `~/.cache/lazymux/events/<server>-<pane>.jsonl` (the last 200 are kept; a new session starts a new log) and never prints anything or fails, so it cannot get in Claude's way.
+| agent | what install writes | events |
+| --- | --- | --- |
+| Claude Code | `~/.claude/settings.json` (`$CLAUDE_CONFIG_DIR`) | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Notification`, `Stop`, `SessionEnd` |
+| Codex | `~/.codex/hooks.json` and `hooks = true` under `[features]` in `config.toml` (`$CODEX_HOME`) | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `Stop` |
+| agy | a `"lazymux"` block in `~/.gemini/config/hooks.json` (`$ANTIGRAVITY_CLI_CONFIG_DIR`) | `SessionStart`, `PreInvocation` (the prompt), `PostToolUse`, `Stop` |
+| opencode | the plugin `~/.config/opencode/plugins/lazymux.js` (`$OPENCODE_CONFIG_DIR`) | prompt, tool call, permission asked, session idle |
+
+Aider has no hooks; its state comes from the screen only.
+
+lazymux's entries sit next to the hooks you (or other tools such as herdr) already have, and reinstalling or uninstalling touches only them; each edited file is backed up as `<file>.lazymux.bak` first (the JSON is rewritten with sorted keys). Restart running agents to pick the hooks up. Every hook runs `lazymux hook <agent> <event>`, which writes one line per event to `~/.cache/lazymux/events/<server>-<pane>.jsonl` (the last 200 are kept; a new session starts a new log), and never fails. It only answers where an agent requires it: `{}` for agy and for Codex's `Stop`, `{"decision":"allow"}` for agy's `Stop`. It never hooks agy's `PreToolUse`, whose answer decides whether a tool may run. For agy, whose screen has no reliable "working" line, a turn in the hook log (a prompt or tool call not yet followed by a stop) also counts as working.
+
+## Notifications and status line
+
+While at least one sidebar (or plain `lazymux`) runs, lazymux watches for two changes:
+
+- an agent becomes **blocked**: `claude needs you` · `api:3 · Bash(go test ./...)`
+- an agent goes from working to **done**: `claude finished` · `api:3 · fix jwt expiry`
+
+The first time lazymux sees an agent it never notifies. A change waits `@lazymux-notify-delay` seconds (1) and is dropped if the state changes again before that, so a short flicker stays quiet. Only one lazymux per tmux server notifies: the sidebars agree through a lock file (`~/.cache/lazymux/leader-<server>.lock`), and when that one exits, another takes over within a second.
+
+**Where notifications go** (`@lazymux-notify`, one or a comma list):
+
+| value | what you get |
+| --- | --- |
+| `system` (default) | a desktop notification (`notify-send` on Linux, `osascript` on macOS) |
+| `terminal` | a notification through your terminal: `OSC 9` for ghostty, iTerm2 and WezTerm, `OSC 99` for kitty, written to each attached client's terminal (no tmux passthrough needed; works over SSH) |
+| `tmux` | a message in the status line of every attached client, for 5 seconds |
+| `off` | nothing |
+
+**Sounds** (`@lazymux-sound on|off`, default on): `@lazymux-sound-blocked` and `@lazymux-sound-done` are sound files (defaults: the freedesktop `message-new-instant` and `complete` sounds), played with the first of `paplay`, `pw-play`, `ffplay`, `mpv`, `afplay` that is installed. `LAZYMUX_NO_SOUND=1` silences them.
+
+`@lazymux-notify-on` picks the events (`blocked,done`). All options are read from tmux on every check, so `tmux set -g @lazymux-notify tmux` takes effect within a second. `lazymux notify test` sends a sample with your settings.
+
+**Status line.** `lazymux status` prints `⣿1 ⣾2 ●1` (blocked, working, done-but-unseen; zero counts left out, nothing at all when no agent needs a look) with tmux colors:
+
+```tmux
+set -g status-right '#(lazymux status) │ %H:%M'
+set -g status-interval 2
+```
+
+It reads the summary the notifying lazymux writes every second (`~/.cache/lazymux/status-<server>.json`). When no sidebar runs, it detects once on its own; that shows blocked and working but cannot know done. `lazymux status --plain` prints without colors.
 
 ## Help screen
 
@@ -291,5 +336,7 @@ lazymux hooks uninstall    # removes only lazymux's entries
 | `lazymux sidebar off` | close all sidebars and remove the hooks |
 | `lazymux sidebar` | run the sidebar UI (started by the toggle inside the sidebar pane) |
 | `lazymux sidebar follow <session-id>` | dock the session's sidebar in its current window (run by the hook) |
-| `lazymux hooks install \| uninstall \| status [settings.json]` | add / remove lazymux in Claude Code's hooks |
-| `lazymux hook` | record one Claude Code hook event from stdin (run by the hooks) |
+| `lazymux hooks install \| uninstall \| status [agent…]` | add / remove lazymux in the hooks of Claude Code, Codex, agy, opencode |
+| `lazymux hook <agent> <event>` | record one hook event from stdin (run by the hooks) |
+| `lazymux status [--plain]` | agent counts for tmux's `status-right` |
+| `lazymux notify test` | send a sample notification with the current settings |

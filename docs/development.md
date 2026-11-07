@@ -17,7 +17,7 @@ go test ./...
 
 | package | tests |
 | --- | --- |
-| `internal/agent` | `Classify` on idle / working / blocked screens of each agent (Claude Code screens captured from real sessions, a prompt high above the bottom ignored), finding agents in a process tree, hook JSON → events and log reset on a new session, `hooks install` / `uninstall` keeping user hooks, settings and the file mode, the detector's state history (working → done, aider's changing screen) and hook data (summary, waiting reason) |
+| `internal/agent` | `Classify` on idle / working / blocked screens of each agent (Claude Code screens captured from real sessions, a prompt high above the bottom ignored), finding agents in a process tree, hook payloads of every agent (Claude Code, Codex `PermissionRequest`, agy camelCase `toolCall`, the opencode plugin) → events, duplicate prompts / stops dropped, the replies agy and Codex need, log reset on a new session, install / uninstall for all four agents in a temporary home (keeping herdr's and the user's hooks, settings and file modes), Codex `[features] hooks = true`, the detector's state history (working → done, done → idle when seen, aider's changing screen) and hook data (summary, waiting reason); the notifier (first sight, delay, flicker cancel, events turned off), `@lazymux-*` option parsing, terminal escape sequences, the status format, leader election |
 | `internal/tmux` | `ParseTree` on fixture lines (including a title with a tab), `TrimCapture`, `rerunCommand`, plus **integration tests** against private tmux servers: listing and capturing (`-L lazymux-test`), kill + restore of a window and a session (`-L lazymux-test-undo`), break-pane staying in its session (`-L lazymux-test-break`), sidebar toggle / follow / off with sidebar panes kept out of the tree (`-L lazymux-test-sidebar`, with a `sleep` standing in for the lazymux binary) |
 | `internal/ui` | the model driven with key messages on a fake tree: navigation cascade and multi-rune keys, the kill dialog defaulting to No, the help screen running a filtered row, `s` asking for one selected item, fuzzy matching, the `/` filter (typing, enter, esc), `space` + `v` range selection and the bulk kill dialog, the move picker targets, `ctrl+p` + `tab` selecting a window, fixed panel heights, preview skipping the own pane, the fzf pick filling the dialog, the Agents page (grouping, blocked first, tabs, summary and waiting lines, Activity with the pending call, answer / reply / `B` / folding keys, badges on the tmux page); sidebar mode: compact view (all sessions, scrolling to the current window, following the page), focus / blur switching to the full UI, `enter` not quitting |
 
@@ -95,10 +95,12 @@ Real agents need a login and a prompt to reach a permission dialog. A fake is en
 export LAZYMUX_EVENTS=/tmp/lzevents
 T set-environment -g LAZYMUX_EVENTS /tmp/lzevents      # for the sidebar started by tmux
 echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"go test ./..."}}' |
-  TMUX="$(T display -p '#{socket_path}'),0,0" TMUX_PANE=%1 /tmp/lazymux hook
+  TMUX="$(T display -p '#{socket_path}'),0,0" TMUX_PANE=%1 /tmp/lazymux hook claude PreToolUse
 ```
 
-`lazymux hooks install /tmp/settings.json` tries the installer on a copy instead of your real Claude Code settings.
+To try notifications without popups on your desktop, set `T set -g @lazymux-notify tmux` and `T set -g @lazymux-sound off` on the throwaway server; the messages show in the attached client's status line. `lazymux -L <server> notify test` sends one on demand.
+
+To try the installers without touching your real agents, point them at copies: `HOME=/tmp/fakehome lazymux hooks install`, or per agent `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `ANTIGRAVITY_CLI_CONFIG_DIR`, `OPENCODE_CONFIG_DIR`. The opencode plugin can be exercised with node: import it with `TMUX_PANE` set and call its `chat.message`, `tool.execute.before` and `event` hooks.
 
 ## Conventions
 

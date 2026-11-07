@@ -22,10 +22,11 @@ const (
 	Gemini   Kind = "gemini"
 	Opencode Kind = "opencode"
 	Aider    Kind = "aider"
+	Agy      Kind = "agy" // Antigravity CLI
 )
 
 // Kinds lists the supported agents.
-var Kinds = []Kind{Claude, Codex, Gemini, Opencode, Aider}
+var Kinds = []Kind{Claude, Codex, Agy, Gemini, Opencode, Aider}
 
 // State is what an agent is doing.
 type State int
@@ -52,21 +53,25 @@ type Agent struct {
 	Kind    Kind
 	State   State
 	Since   time.Time // when State last changed (or when the agent was found)
-	Worked  bool      // has been seen working: an idle agent is "done", not just "idle"
+	Unseen  bool      // finished while you were not looking: "done" until you look at it
 	Summary string    // what it works on: last prompt (hooks) or the pane title
 	Waiting string    // blocked: what it waits for, e.g. "Bash(go test ./...)"
 	Hooked  bool      // hook events exist for this pane
 	Events  []Event   // activity timeline from hooks, oldest first
 }
 
-// Label is the state word shown in lists: "done" for an idle agent that
-// worked before, "idle" for one that has not.
+// Label is the state word shown in lists. An idle agent is "done" while
+// you have not looked at it since it finished, "idle" after that (herdr's
+// done / idle distinction).
 func (a *Agent) Label() string {
-	if a.State == Idle && a.Worked {
+	if a.State == Idle && a.Unseen {
 		return "done"
 	}
 	return a.State.String()
 }
+
+// Done reports an agent that finished and has not been looked at.
+func (a *Agent) Done() bool { return a.State == Idle && a.Unseen }
 
 // Age formats how long ago t was, compactly: "40s", "3m", "2h", "5d".
 func Age(t, now time.Time) string {

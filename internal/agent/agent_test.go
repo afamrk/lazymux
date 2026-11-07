@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,7 +104,7 @@ func TestHookEvents(t *testing.T) {
 		`{"hook_event_name":"PostToolUse","tool_name":"Bash"}`,
 	}
 	for _, raw := range in {
-		if ev, ok := eventFromHook([]byte(raw), now); ok {
+		if ev, ok := eventFromHook("", []byte(raw), now); ok {
 			if err := appendEvent(dir, "default", "%12", ev); err != nil {
 				t.Fatal(err)
 			}
@@ -115,55 +114,153 @@ func TestHookEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(evs) != 4 {
-		t.Fatalf("got %d events, want 4 (PostToolUse is not recorded): %+v", len(evs), evs)
+	if len(evs) != 5 {
+		t.Fatalf("got %d events, want 5: %+v", len(evs), evs)
 	}
 	if evs[1].Detail != "fix jwt expiry validation" || evs[2].Detail != "internal/auth/jwt.go" || evs[3].Name != "Bash" {
 		t.Errorf("events: %+v", evs)
 	}
 	// a new session clears the log
-	ev, _ := eventFromHook([]byte(`{"hook_event_name":"SessionStart","source":"clear"}`), now)
+	ev, _ := eventFromHook("", []byte(`{"hook_event_name":"SessionStart","source":"clear"}`), now)
 	appendEvent(dir, "default", "%12", ev)
 	if evs, _ := readEvents(eventFile(dir, "default", "%12")); len(evs) != 1 {
 		t.Errorf("after start: %d events", len(evs))
 	}
 }
 
-func TestInstallHooks(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	orig := `{"model":"opus","hooks":{"Stop":[{"hooks":[{"type":"command","command":"notify-send done"}]}]}}`
-	os.WriteFile(path, []byte(orig), 0o640)
+func TestHookPayloadsPerAgent(t *testing.T) {
+	now := time.Unix(1000, 0)
+	for _, tc := range []struct {
+		name, event, raw string
+		want             Event
+	}{
+		{"codex permission", "PermissionRequest", `{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"rm -rf build"}}`,
+			Event{Kind: "notify", Detail: "needs permission: Bash"}},
+		{"agy prompt", "PreInvocation", `{"conversationId":"c1","lastUserInput":"add table tests","invocationNum":1}`,
+			Event{Kind: "prompt", Detail: "add table tests"}},
+		{"agy tool", "PostToolUse", `{"workspacePaths":["/src/ui"],"toolCall":{"name":"run_command","args":{"CommandLine":"go test ./..."}},"stepIdx":3}`,
+			Event{Kind: "tool", Name: "run_command", Detail: "go test ./..."}},
+		{"agy file tool", "PostToolUse", `{"workspacePaths":["/src/ui"],"toolCall":{"name":"view_file","args":{"AbsolutePath":"/src/ui/app.go"}}}`,
+			Event{Kind: "tool", Name: "view_file", Detail: "app.go"}},
+		{"agy stop", "Stop", `{"terminationReason":"NO_TOOL_CALL","fullyIdle":true}`, Event{Kind: "stop"}},
+		{"opencode tool", "tool", `{"tool_name":"edit","tool_input":{"filePath":"/x/main.go"}}`, Event{Kind: "tool", Name: "edit", Detail: "/x/main.go"}},
+		{"opencode permission", "permission", `{"title":"Run bash: ls"}`, Event{Kind: "notify", Detail: "needs permission: Run bash: ls"}},
+	} {
+		got, ok := eventFromHook(tc.event, []byte(tc.raw), now)
+		got.T = time.Time{}
+		if !ok || got != tc.want {
+			t.Errorf("%s: got %+v (ok=%v), want %+v", tc.name, got, ok, tc.want)
+		}
+	}
+	if _, ok := eventFromHook("PreInvocation", []byte(`{"lastUserInput":""}`), now); ok {
+		t.Error("a PreInvocation without user input is not a prompt")
+	}
+	// agy repeats PreInvocation for every model call of a turn
+	evs := []Event{{Kind: "prompt", Detail: "a"}, {Kind: "tool", Name: "x"}}
+	if !skipDuplicate(evs, Event{Kind: "prompt", Detail: "a"}) || skipDuplicate(append(evs, Event{Kind: "stop"}), Event{Kind: "prompt", Detail: "a"}) {
+		t.Error("duplicate prompt handling")
+	}
+}
 
-	changed, err := InstallHooks(path, "'/usr/bin/lazymux' hook")
-	if err != nil || !changed {
-		t.Fatalf("install: %v %v", changed, err)
+func TestHookReplies(t *testing.T) {
+	for _, tc := range []struct{ agent, event, want string }{
+		{"agy", "PostToolUse", "{}\n"}, {"agy", "Stop", "{\"decision\":\"allow\"}\n"},
+		{"codex", "Stop", "{}\n"}, {"codex", "PreToolUse", ""}, {"claude", "Stop", ""},
+	} {
+		var b strings.Builder
+		t.Setenv("TMUX_PANE", "") // not in tmux: records nothing, still replies
+		RunHook([]string{tc.agent, tc.event}, strings.NewReader("{}"), &b)
+		if b.String() != tc.want {
+			t.Errorf("%s %s replied %q, want %q", tc.agent, tc.event, b.String(), tc.want)
+		}
 	}
-	if !HooksInstalled(path) {
-		t.Fatal("not installed")
+}
+
+func TestIntegrations(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, v := range []string{"CLAUDE_CONFIG_DIR", "CODEX_HOME", "ANTIGRAVITY_CLI_CONFIG_DIR", "OPENCODE_CONFIG_DIR", "XDG_CONFIG_HOME"} {
+		t.Setenv(v, "")
 	}
-	if changed, _ := InstallHooks(path, "'/usr/bin/lazymux' hook"); changed {
-		t.Error("second install changed the file")
+	mk := func(rel, content string) string {
+		p := filepath.Join(home, rel)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		if content != "" {
+			os.WriteFile(p, []byte(content), 0o640)
+		}
+		return p
 	}
-	var s map[string]any
-	data, _ := os.ReadFile(path)
-	json.Unmarshal(data, &s)
-	stop := s["hooks"].(map[string]any)["Stop"].([]any)
-	if len(stop) != 2 || s["model"] != "opus" {
-		t.Errorf("user hook or setting lost: %s", data)
+	claude := mk(".claude/settings.json", `{"model":"opus","hooks":{"Stop":[{"hooks":[{"type":"command","command":"notify-send done"}]}]}}`)
+	codexHooks := mk(".codex/hooks.json", `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"bash '/h/.codex/herdr-agent-state.sh' session"}]}]}}`)
+	codexConfig := mk(".codex/config.toml", "model = \"o3\"\n\n[tui]\nx = 1\n")
+	agyHooks := mk(".gemini/config/hooks.json", `{"herdr":{"PreInvocation":[{"type":"command","command":"bash x session"}]}}`)
+	mk(".config/opencode/opencode.jsonc", "{}")
+
+	exe := "/usr/local/bin/lazymux"
+	for _, i := range Integrations() {
+		if !i.Detected() {
+			t.Fatalf("%s not detected", i.Kind)
+		}
+		if changed, err := i.Install(exe); err != nil || !changed {
+			t.Fatalf("%s install: %v %v", i.Kind, changed, err)
+		}
+		if !i.Installed() {
+			t.Errorf("%s not installed after install", i.Kind)
+		}
+		if changed, _ := i.Install(exe); changed {
+			t.Errorf("%s: second install changed files", i.Kind)
+		}
 	}
-	if st, _ := os.Stat(path); st.Mode().Perm() != 0o640 {
-		t.Errorf("mode %v", st.Mode().Perm())
+	read := func(p string) string { b, _ := os.ReadFile(p); return string(b) }
+	if c := read(claude); !strings.Contains(c, "notify-send done") || !strings.Contains(c, "hook claude PreToolUse") || !strings.Contains(c, `"model": "opus"`) {
+		t.Errorf("claude settings:\n%s", c)
 	}
-	if bak, _ := os.ReadFile(path + ".lazymux.bak"); string(bak) != orig {
-		t.Error("no backup")
+	if st, _ := os.Stat(claude); st.Mode().Perm() != 0o640 {
+		t.Errorf("claude settings mode %v", st.Mode().Perm())
+	}
+	if c := read(codexHooks); !strings.Contains(c, "herdr-agent-state.sh") || !strings.Contains(c, "hook codex PermissionRequest") {
+		t.Errorf("codex hooks:\n%s", c)
+	}
+	if c := read(codexConfig); !strings.Contains(c, "[features]\nhooks = true") || !strings.Contains(c, "model = \"o3\"") {
+		t.Errorf("codex config:\n%s", c)
+	}
+	if c := read(agyHooks); !strings.Contains(c, `"herdr"`) || !strings.Contains(c, "hook agy PostToolUse") || strings.Contains(c, "hook agy PreToolUse") {
+		t.Errorf("agy hooks:\n%s", c)
+	}
+	if c := read(filepath.Join(home, ".config/opencode/plugins/lazymux.js")); !strings.Contains(c, `"/usr/local/bin/lazymux"`) || !strings.Contains(c, opencodeMarker) {
+		t.Errorf("opencode plugin:\n%s", c)
 	}
 
-	if changed, err := UninstallHooks(path); err != nil || !changed {
-		t.Fatalf("uninstall: %v %v", changed, err)
+	for _, i := range Integrations() {
+		if changed, err := i.Uninstall(); err != nil || !changed {
+			t.Errorf("%s uninstall: %v %v", i.Kind, changed, err)
+		}
+		if i.Installed() {
+			t.Errorf("%s still installed", i.Kind)
+		}
 	}
-	data, _ = os.ReadFile(path)
-	if HooksInstalled(path) || !strings.Contains(string(data), "notify-send done") || strings.Contains(string(data), "PreToolUse") {
-		t.Errorf("after uninstall: %s", data)
+	if c := read(claude); !strings.Contains(c, "notify-send done") || strings.Contains(c, "lazymux") {
+		t.Errorf("claude after uninstall:\n%s", c)
+	}
+	if c := read(codexHooks); !strings.Contains(c, "herdr-agent-state.sh") || strings.Contains(c, "lazymux") {
+		t.Errorf("codex after uninstall:\n%s", c)
+	}
+	if c := read(agyHooks); !strings.Contains(c, `"herdr"`) || strings.Contains(c, "lazymux") {
+		t.Errorf("agy after uninstall:\n%s", c)
+	}
+}
+
+func TestEnableCodexHooks(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                                 "\n[features]\nhooks = true\n",
+		"[features]\nother = 1\n":          "[features]\nhooks = true\nother = 1\n",
+		"[features]\nhooks = false\n[x]\n": "[features]\nhooks = true\n[x]\n",
+		"[features]\nhooks = true\n":       "[features]\nhooks = true\n",
+		"a = 1":                            "a = 1\n\n[features]\nhooks = true\n",
+	} {
+		if got := enableCodexHooks(in); got != want {
+			t.Errorf("enableCodexHooks(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
@@ -202,6 +299,12 @@ func TestDetector(t *testing.T) {
 	if got = d.Detect(tree); got["%3"].State != Idle {
 		t.Errorf("aider with a still screen: %+v", got["%3"])
 	}
+	// looking at it (a client attaches) makes the done agent idle
+	seenTree, _ := tmux.ParseTree(strings.ReplaceAll(row("%1", "claude", "✳ Fix login bug"), "\twork\t0\t", "\twork\t1\t"))
+	if a := d.Detect(seenTree)["%1"]; a.Unseen || a.Label() != "idle" {
+		t.Errorf("claude after being seen: %+v", a)
+	}
+	d.Detect(tree)
 
 	// hooks: the prompt becomes the summary, the pending tool the waiting reason
 	for _, e := range []Event{{T: now, Kind: "prompt", Detail: "fix jwt expiry"}, {T: now, Kind: "tool", Name: "Bash", Detail: "go test ./..."}} {
@@ -214,9 +317,10 @@ func TestDetector(t *testing.T) {
 	}
 }
 
-// row is a list-panes line in tmux.ParseTree's format.
+// row is a list-panes line in tmux.ParseTree's format, in a session no
+// client is attached to (so nothing is visible).
 func row(id, cmd, title string) string {
-	f := []string{"$0", "work", "1", "@" + id[1:], id[1:], "w" + id[1:], "1", "lay",
+	f := []string{"$0", "work", "0", "@" + id[1:], id[1:], "w" + id[1:], "1", "lay",
 		id, "0", "1", cmd, "/src", "100", "80", "24", "0", "0", "", title}
 	return strings.Join(f, "\t")
 }

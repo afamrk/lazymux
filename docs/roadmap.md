@@ -17,15 +17,18 @@ New session / window / pane (with an fzf directory picker), rename, kill with a 
 - `ctrl+p`: one fuzzy search over every session, window and pane; `enter` goes there, `tab` only selects
 
 ### ✅ P3: Agents page
-- detection with no setup for Claude Code, Codex, Gemini CLI, opencode and aider: the pane's command or process tree gives the agent, the bottom of its screen the state (blocked / working / idle-done)
-- optional Claude Code hooks (`lazymux hooks install`): last prompt as summary, the pending tool call as waiting reason, the Activity timeline
+- detection with no setup for Claude Code, Codex, agy, opencode and aider (and Gemini CLI): the pane's command or process tree gives the agent, the bottom of its screen the state (blocked / working / idle-done)
+- optional hooks for Claude Code, Codex, agy and opencode (`lazymux hooks install`, modeled on herdr's integrations): last prompt as summary, the pending tool call as waiting reason, the Activity timeline
 - agents grouped by session, blocked sessions first, foldable headers with the worst state (`⣿` / `⣾` / `●`); two lines per agent; `All │ Blocked │ Working │ Done` tabs with live counts
 - `1` / `2` / `3` answer a permission prompt, `i` reply, `x` interrupt, `B` next blocked, `enter` go to the pane
 - badges on session, window and pane rows and in the compact sidebar (totals `⣿1 ⣾2 ●1` in its header); the kill dialog warns about agents
 
-### P4: notifications and status line
-- `lazymux status` prints a compact summary such as `⣿1 ⣾2 ●1` for tmux's `status-right`
-- desktop notification (`notify-send`) when an agent goes from working to blocked or done
+### ✅ P4: notifications and status line (ideas from herdr's source)
+- `lazymux status` prints `⣿1 ⣾2 ●1` with tmux colors for `status-right`
+- notifications when an agent becomes blocked or finishes: desktop (`notify-send` / `osascript`), terminal (`OSC 9` / `OSC 99` straight to the client tty), tmux message, sounds; a 1 s delay drops flickers
+- one notifier per server, picked with a lock file; it also writes the status summary
+- done means unseen: `● done` until you look at the window or select the agent, then `○ idle`
+- settings as tmux options (`@lazymux-notify`, `-notify-on`, `-notify-delay`, `-sound`, `-sound-blocked`, `-sound-done`)
 
 ### P5: projects and worktrees
 - `N`: fuzzy project picker (zoxide → fd → configured roots), creates or attaches a session named after the directory
@@ -48,7 +51,8 @@ Ideas collected from tmux-fzf, agenmux, tmux-agent-sidebar and herdr, roughly by
 4. **Process actions**: send SIGINT / TERM / KILL / STOP / CONT to a pane's process, show its process tree
 5. **User menu**: custom commands from a config file
 6. **Row metadata**: git branch and dirty flag of a pane's directory, last activity, listening ports
-7. **Config file** (`~/.config/lazymux/config.yml`): keys, theme, row formats; more themes (gruvbox…)
+7. **Config file** (`~/.config/lazymux/config.yml`): keys, theme, row formats; more themes (gruvbox…). Notification settings already live in tmux options (`@lazymux-*`)
+11. **Notification extras** (herdr has them): click a notification to jump to the pane, per-agent sound on/off, skip notifications for the window you are looking at
 8. **Event-driven refresh** with tmux control mode (`tmux -C`) instead of polling
-9. **Agent extras**: token / cost from hooks, quick approve, per-agent history; hooks for Codex (`notify`) and Gemini CLI; an Activity timeline from the screen for agents without hooks
+9. **Agent extras**: token / cost from hooks, quick approve, per-agent history; an Activity timeline from the screen for agents without hooks
 10. **Mouse**: click to select, wheel to scroll

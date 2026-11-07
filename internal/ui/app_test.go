@@ -522,3 +522,23 @@ func TestLeftColumnIsCappedOnWideScreens(t *testing.T) {
 		m.Update(key("a"))
 	}
 }
+
+func TestDoneAgentBecomesIdleWhenSelected(t *testing.T) {
+	m := agentModel(t)
+	m.agents["%4"].State, m.agents["%4"].Unseen = agent.Idle, true // codex finished while you were away
+	m.Update(key("3"))
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "● done") || ansi.Strip(m.agentSummary()) != "⣿1 ●1" {
+		t.Fatalf("finished agent should show as done (● and in the totals):\n%s", v)
+	}
+	m.Update(key("a")) // Agents page: claude (blocked) is selected first
+	if !m.agents["%4"].Unseen {
+		t.Fatal("codex is not selected yet, it must stay done")
+	}
+	m.Update(key("G")) // select codex
+	if a, _ := m.curAgent(); a == nil || a.Pane != "%4" || a.Unseen {
+		t.Fatalf("selecting the done agent should mark it seen: %+v", a)
+	}
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "○ codex") || !strings.Contains(v, "idle") {
+		t.Errorf("seen agent should show as ○ idle:\n%s", v)
+	}
+}

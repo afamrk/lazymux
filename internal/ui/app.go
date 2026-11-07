@@ -47,6 +47,8 @@ type Model struct {
 	agentFocus int // agent list or Activity
 
 	det       *agent.Detector
+	leader    *agent.Leader // held by the one lazymux that notifies and writes the status file
+	notifier  *agent.Notifier
 	agents    map[string]*agent.Agent // detected agents by pane id
 	detecting bool                    // a detection is running
 	agentSel  string                  // selected agent row: pane id, or "s:<session id>" for a header
@@ -90,7 +92,8 @@ type Model struct {
 func New(c *tmux.Client) *Model {
 	s, w, p := c.Current()
 	return &Model{c: c, selSess: s, selWin: w, selPane: p, selfPane: os.Getenv("TMUX_PANE"),
-		det: agent.NewDetector(c), collapsed: map[string]bool{}}
+		det: agent.NewDetector(c), collapsed: map[string]bool{},
+		leader: agent.NewLeader(c.ServerName()), notifier: agent.NewNotifier()}
 }
 
 type (
@@ -777,7 +780,7 @@ func (m *Model) paneRow(p *tmux.Pane, w, sel int) string {
 		hlSegs(p.Command, idx, m.textStyle(panelPanes), stMatch)...)
 	var right []seg
 	if a := m.agents[p.ID]; a != nil {
-		right = append(right, seg{stateGlyph(a.State) + " " + a.Label() + " ", stateStyle(a.State)})
+		right = append(right, seg{agentGlyph(a) + " " + a.Label() + " ", agentStyle(a)})
 	}
 	right = append(right, seg{fmt.Sprintf("%dx%d", p.Width, p.Height), stFaint})
 	if p.Active {

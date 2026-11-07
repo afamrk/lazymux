@@ -1,6 +1,6 @@
 # lazymux
 
-A sidebar for tmux, in the spirit of [herdr](https://github.com/herdrdev/herdr) and [lazygit](https://github.com/jesseduffield/lazygit). It sits on the left of your current window and follows you from window to window. Unfocused, it is a compact list of every session and window. Move into it and it grows into a lazygit-style UI: browse sessions, windows and panes in three panels with a live preview, and create, rename, kill, move, swap, zoom and re-layout things with single keys. The **Agents** page (press `a`) finds the AI coding agents running in your panes (Claude Code, Codex, Gemini CLI, opencode, aider), shows which are blocked, working or done, and lets you answer a permission prompt, reply or interrupt without leaving the sidebar.
+A sidebar for tmux, in the spirit of [herdr](https://github.com/herdrdev/herdr) and [lazygit](https://github.com/jesseduffield/lazygit). It sits on the left of your current window and follows you from window to window. Unfocused, it is a compact list of every session and window. Move into it and it grows into a lazygit-style UI: browse sessions, windows and panes in three panels with a live preview, and create, rename, kill, move, swap, zoom and re-layout things with single keys. The **Agents** page (press `a`) finds the AI coding agents running in your panes (Claude Code, Codex, agy, opencode, aider), shows which are blocked, working or done, and lets you answer a permission prompt, reply or interrupt without leaving the sidebar.
 
 Unfocused (30 columns):
 
@@ -46,8 +46,8 @@ Focused (60% of the window):
 | P1 | New / rename / kill + undo / move / swap / break / zoom / layout, dialogs, help | ✅ done |
 | Sidebar | Docked left pane that follows you; compact when unfocused, full UI at 60% when focused | ✅ done |
 | P2 | `/` filter, multi-select + bulk kill / move, jump anywhere (`ctrl+p`) | ✅ done |
-| P3 | Agents page (`a`): agents grouped by session under All / Blocked / Working / Done tabs, answer / reply / interrupt, Activity timeline from Claude Code hooks | ✅ done |
-| P4 | Desktop notifications, `lazymux status` for the tmux status line | planned |
+| P3 | Agents page (`a`): agents grouped by session under All / Blocked / Working / Done tabs, answer / reply / interrupt, Activity timeline from agent hooks hooks | ✅ done |
+| P4 | Notifications (desktop / terminal / tmux, sounds) on blocked and done, `lazymux status` for the tmux status line, done = unseen | ✅ done |
 | P5 | Project picker (sessionizer), git worktree + agent spawn | planned |
 
 See [docs/roadmap.md](docs/roadmap.md) for details and open decisions.
@@ -86,15 +86,37 @@ Now:
 
 ### Agents
 
-Agents are found with no setup: lazymux looks at each pane's process and reads its screen to tell whether the agent is **blocked** (`⣿`, a permission prompt), **working** (`⣾`) or **done** (`●`). Press `a` for the Agents page; there `1` / `2` / `3` answer a prompt, `i` sends a reply, `x` interrupts and `B` jumps to the next blocked agent.
+Agents are found with no setup: lazymux looks at each pane's process and reads its screen to tell whether the agent is **blocked** (`⣿`, a permission prompt), **working** (`⣾`), **done** (`●`, finished and you haven't looked yet) or **idle** (`○`). Press `a` for the Agents page; there `1` / `2` / `3` answer a prompt, `i` sends a reply, `x` interrupts and `B` jumps to the next blocked agent.
 
-For Claude Code you can add hooks, which give the Agents page the prompt, the exact tool call an agent waits on, and an Activity timeline:
+Hooks give the Agents page the prompt, the exact tool call an agent waits on, and an Activity timeline. One command adds them to every installed agent (Claude Code, Codex, agy, opencode), next to your existing hooks and with backups:
 
 ```sh
-lazymux hooks install     # adds lazymux to ~/.claude/settings.json (keeps a backup)
+lazymux hooks install     # or: lazymux hooks install codex agy
 lazymux hooks status
 lazymux hooks uninstall
 ```
+
+### Status line and notifications
+
+While a sidebar runs, lazymux tells you when an agent needs you (`⣿ claude needs you: api:3 · Bash(go test…)`) or finishes, with a desktop notification and a sound. Put the counts in your tmux status line too:
+
+```tmux
+set -g status-right '#(lazymux status) │ %H:%M'
+set -g status-interval 2
+```
+
+Optional settings (defaults shown):
+
+```tmux
+set -g @lazymux-notify 'system'          # system, terminal (OSC 9 via ghostty/kitty/iTerm/WezTerm), tmux, off; or a list: 'system,tmux'
+set -g @lazymux-notify-on 'blocked,done'
+set -g @lazymux-notify-delay 1           # seconds; a state that flips back sooner does not notify
+set -g @lazymux-sound 'on'
+set -g @lazymux-sound-blocked '/usr/share/sounds/freedesktop/stereo/message-new-instant.oga'
+set -g @lazymux-sound-done '/usr/share/sounds/freedesktop/stereo/complete.oga'
+```
+
+`lazymux notify test` sends a sample notification with your settings.
 
 You can still run plain `lazymux` in a terminal, full screen: inside tmux `enter` switches and exits, outside tmux it attaches your terminal to the chosen session.
 

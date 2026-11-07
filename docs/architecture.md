@@ -3,7 +3,7 @@
 lazymux is a single Go binary, normally running as a sidebar pane in each session (see [Sidebar](#sidebar)). It never keeps tmux state of its own: every second it asks tmux for the full session/window/pane tree, and every action is a plain `tmux` command.
 
 ```
-cmd/lazymux/main.go        flags; `sidebar [toggle|off|follow]`, `hook`, `hooks [install|uninstall|status]` subcommands; starts the Bubble Tea program (sidebar or full screen); execs `tmux attach` when outside tmux
+cmd/lazymux/main.go        flags; `sidebar [toggle|off|follow]`, `hook`, `hooks [install|uninstall|status]`, `status`, `notify test` subcommands; starts the Bubble Tea program (sidebar or full screen); execs `tmux attach` when outside tmux
 internal/tmux/             everything that talks to tmux
   client.go                Client{Socket, ClientTTY}; Run(args…) execs `tmux [-L socket] args…`
   tree.go                  Session / Window / Pane types; ListTree (one list-panes call) + ParseTree
@@ -11,7 +11,9 @@ internal/tmux/             everything that talks to tmux
   snapshot.go              undo: Snap{Session,Window,Pane} before a kill, Restore after
   sidebar.go               sidebar panes: toggle, follow / re-dock, off, hooks, focus and size queries
 internal/agent/            agent detection: agent.go (types, keys per agent), procs.go (process tree),
-                           screen.go (Classify), hooks.go (hook events, install), detector.go
+                           screen.go (Classify), hooks.go (hook events, install), detector.go,
+                           notify.go (Notifier, Config from tmux options, delivery, sounds),
+                           leader.go (lock-file leader, status summary for `lazymux status`)
 internal/ui/               the terminal UI (Bubble Tea model)
   app.go                   Model: selection, focus, refresh loop, key routing, layout and panel rendering
   actions.go               what each action key does: dialogs, bulk kill, toasts, undo stack
@@ -134,7 +136,22 @@ tick ──► detectAgents (one at a time) ──► Detector.Detect(tree) ─�
 - **State.** `Classify(kind, screen)` looks only at the last 30 non-blank lines. Blocked: a selected first option (`❯ 1. Yes`, `› 1. Yes, proceed`, `● 1. Allow once`) within the last 15 lines; opencode's "Allow once"; aider's `(Y)es/(N)o` on the last line. Working: an interrupt hint (`esc to interrupt`, `esc to cancel`) in the last 10 lines, or Claude Code's spinner line `✽ Word… (`. Otherwise idle. For aider, which has neither, a screen that changed within 3 seconds counts as working. Non-breaking spaces (Claude's prompt uses them) are normalized first.
 - **History.** The detector keeps a `track` per pane: the last screen, when it changed, the state and since when. `Since` changes only with the state; `Worked` turns an idle agent into "done". Tracks of panes that no longer run an agent are dropped.
 - **Summary and waiting reason.** Summary: the last hook prompt, else Claude Code's terminal title (`✳ Fix JWT expiry`, minus the glyph; the hostname default is ignored). Waiting: the pending hook tool call (`Bash(go test ./...)`, the last `tool` event with only notifications after it), else the tool header and the line under it on the screen (`Bash command: go test ./...`).
-- **Hooks.** `lazymux hook` reads Claude Code's hook JSON on stdin and appends a compact event (`{"t","k","n","d"}`, kinds start / prompt / tool / notify / stop / end) to the log named after `$TMUX`'s socket and `$TMUX_PANE`. `start` truncates the log; it is cut back to 200 events when it grows. A log ending in `end` is ignored. `lazymux hooks install` edits the settings JSON generically (`map[string]any`), adding one group per event and recognizing its own entries by a command that contains `lazymux` and ends in ` hook`, so reinstalling replaces them and uninstall removes only them. Note that Go re-sorts the keys of the file.
+- **Hooks.** `lazymux hook <agent> <event>` reads the agent's hook payload on stdin and appends a compact event (`{"t","k","n","d"}`, kinds start / prompt / tool / notify / stop / end) to the log named after `$TMUX`'s socket and `$TMUX_PANE`. `eventFromHook` maps every agent's event names (`UserPromptSubmit` / `PreInvocation` / `prompt`, `PreToolUse` / `PostToolUse` / `tool`, `PermissionRequest` / `Notification`…) and looks fields up by all their spellings: snake_case from Claude Code and Codex, agy's camelCase protojson (`lastUserInput`, `toolCall.name` / `.args`, `CommandLine`, `AbsolutePath`), the plugin's own. Repeats are dropped (agy sends `PreInvocation` before every model call of a turn). `start` truncates the log; it is cut back to 200 events when it grows; a log ending in `end` is ignored. `hookReply` prints what an agent requires (`{}` for agy and Codex's `Stop`).
+- **Integrations** (`integrations.go`, after herdr's): one entry per agent with its config directory (env override, else the default), install / uninstall / status. Claude Code and Codex share `installGroups` (one group per event in a `"hooks"` object; lazymux's commands are recognized by `lazymux` + ` hook`); Codex also gets `hooks = true` in `[features]` of `config.toml` (a line edit, kept on uninstall); agy gets a whole named block `"lazymux"`; opencode gets a v1 plugin file (marked with `LAZYMUX_INTEGRATION=opencode`) that spawns `lazymux hook opencode <event>` detached. Every edit goes through `editJSON` / `editText`, which back up the old file and keep its mode.
 - **Actions** are plain `send-keys`: `AnswerKeys(kind, n)` per agent, `Interrupt(kind)` (`Escape`, or `C-c` for aider), and `SendLine` for replies.
 
 In the UI, `agentRows()` builds the list for the current tab (session headers + agents, blocked sessions first, folded sessions as headers only). The selection is a pane id or `s:<session id>`, so it survives refreshes like the tmux page selection. On the Agents page `previewTarget` returns the selected agent's pane, so the normal preview capture serves both pages.
+
+## Notifications and status
+
+Every lazymux process detects agents, but only the **leader** acts on changes. `Leader.Acquire` takes a non-blocking `flock` on `~/.cache/lazymux/leader-<server>.lock` and keeps the file open; the kernel drops the lock when the process exits, so the next detection of another sidebar takes over. In the detection command (off the UI goroutine) the leader:
+
+1. reads the `@lazymux-*` options (`show-options -g`, every detection, so changes apply immediately),
+2. feeds the agents to `Notifier.Observe`, which remembers each pane's previous state: `→ blocked` and `working → idle` create a pending note due after `Delay`; a pending note is dropped when the state changes before it is due; the first sight of a pane never notifies,
+3. delivers due notes in goroutines (`notify-send` / `osascript`, the `OSC 9` / `OSC 99` sequence written straight to each attached client's tty from `list-clients`, `display-message -c`, a sound player with a 15 s timeout),
+4. writes `status-<server>.json` (counts, time) atomically.
+
+`lazymux status` prints that file when it is younger than 10 s; otherwise it runs one detection itself (no history, so no done count).
+
+**Done = unseen** (from herdr): `Agent.Unseen` is set when the state changes to idle while the pane is not `Visible` (its window is not the current window of an attached session) and cleared whenever it is visible, or when the Agents page selects it (`Detector.MarkSeen`). Each lazymux keeps its own seen state; they agree because visibility comes from tmux.
+

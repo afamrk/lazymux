@@ -53,37 +53,68 @@ func eventFile(dir, server, pane string) string {
 	return filepath.Join(dir, clean(server)+"-"+clean(pane)+".jsonl")
 }
 
-// hookInput is the part of Claude Code's hook JSON lazymux uses.
-type hookInput struct {
-	Event     string          `json:"hook_event_name"`
-	Cwd       string          `json:"cwd"`
-	Prompt    string          `json:"prompt"`
-	Tool      string          `json:"tool_name"`
-	ToolInput json.RawMessage `json:"tool_input"`
-	Message   string          `json:"message"`
-	Source    string          `json:"source"`
-}
+// Hook payloads differ per agent: Claude Code and Codex send snake_case
+// JSON with hook_event_name, agy sends camelCase protojson (toolCall,
+// lastUserInput), and lazymux's own opencode plugin and aider command pass
+// the event name as an argument. eventFromHook looks fields up by every name
+// they use.
 
-// eventFromHook converts hook JSON to an Event; ok is false for events
-// lazymux does not record.
-func eventFromHook(raw []byte, now time.Time) (Event, bool) {
-	var in hookInput
-	if err := json.Unmarshal(raw, &in); err != nil {
-		return Event{}, false
+// eventFromHook converts a hook payload to an Event. name is the event name
+// from the command line ("" means: read hook_event_name from the payload).
+// ok is false for events lazymux does not record.
+func eventFromHook(name string, raw []byte, now time.Time) (Event, bool) {
+	var in map[string]any
+	if len(strings.TrimSpace(string(raw))) > 0 {
+		if err := json.Unmarshal(raw, &in); err != nil {
+			return Event{}, false
+		}
+	}
+	if name == "" {
+		name = str(in, "hook_event_name", "hookEventName")
+	}
+	cwd := str(in, "cwd")
+	if cwd == "" {
+		if ws, ok := in["workspacePaths"].([]any); ok && len(ws) > 0 {
+			cwd, _ = ws[0].(string)
+		}
 	}
 	ev := Event{T: now}
-	switch in.Event {
-	case "SessionStart":
-		ev.Kind, ev.Detail = "start", in.Source
-	case "UserPromptSubmit":
-		ev.Kind, ev.Detail = "prompt", oneLine(in.Prompt, 300)
-	case "PreToolUse":
-		ev.Kind, ev.Name, ev.Detail = "tool", in.Tool, toolDetail(in.Tool, in.ToolInput, in.Cwd)
-	case "Notification":
-		ev.Kind, ev.Detail = "notify", oneLine(in.Message, 200)
-	case "Stop":
+	switch name {
+	case "SessionStart", "start":
+		ev.Kind, ev.Detail = "start", str(in, "source")
+	case "UserPromptSubmit", "PreInvocation", "prompt":
+		ev.Kind, ev.Detail = "prompt", oneLine(str(in, "prompt", "lastUserInput", "userPrompt", "text"), 300)
+		if ev.Detail == "" {
+			return Event{}, false
+		}
+	case "PreToolUse", "PostToolUse", "tool":
+		call, _ := in["toolCall"].(map[string]any)
+		ev.Kind = "tool"
+		ev.Name = str(in, "tool_name", "toolName", "tool")
+		if ev.Name == "" {
+			ev.Name = str(call, "name")
+		}
+		input := in["tool_input"]
+		for _, k := range []string{"toolInput", "args"} {
+			if input == nil {
+				input = in[k]
+			}
+		}
+		if input == nil && call != nil {
+			input = call["args"]
+		}
+		ev.Detail = toolDetail(input, cwd)
+	case "Notification", "notify":
+		ev.Kind, ev.Detail = "notify", oneLine(str(in, "message"), 200)
+	case "PermissionRequest", "permission":
+		ev.Kind = "notify"
+		ev.Detail = "needs permission"
+		if t := str(in, "tool_name", "toolName", "title"); t != "" {
+			ev.Detail += ": " + oneLine(t, 100)
+		}
+	case "Stop", "stop":
 		ev.Kind = "stop"
-	case "SessionEnd":
+	case "SessionEnd", "end":
 		ev.Kind = "end"
 	default:
 		return Event{}, false
@@ -91,11 +122,32 @@ func eventFromHook(raw []byte, now time.Time) (Event, bool) {
 	return ev, true
 }
 
-// toolDetail picks the interesting argument of a tool call.
-func toolDetail(tool string, input json.RawMessage, cwd string) string {
-	var m map[string]any
-	_ = json.Unmarshal(input, &m)
-	str := func(k string) string { s, _ := m[k].(string); return s }
+// str returns the first non-empty string field of m among keys.
+func str(m map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if s, ok := m[k].(string); ok && s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// toolDetail picks the interesting argument of a tool call. Argument names
+// differ per agent (command / CommandLine, file_path / AbsolutePath…), so
+// keys are compared case-insensitively.
+func toolDetail(input any, cwd string) string {
+	m, ok := input.(map[string]any)
+	if !ok {
+		if s, isStr := input.(string); isStr { // e.g. argumentsJson
+			_ = json.Unmarshal([]byte(s), &m)
+		}
+	}
+	lower := map[string]string{}
+	for k, v := range m {
+		if s, ok := v.(string); ok && s != "" {
+			lower[strings.ToLower(k)] = s
+		}
+	}
 	rel := func(p string) string {
 		if cwd != "" {
 			if r, err := filepath.Rel(cwd, p); err == nil && !strings.HasPrefix(r, "..") {
@@ -104,26 +156,22 @@ func toolDetail(tool string, input json.RawMessage, cwd string) string {
 		}
 		return p
 	}
-	var d string
-	switch {
-	case str("command") != "":
-		d = str("command")
-	case str("file_path") != "":
-		d = rel(str("file_path"))
-	case str("notebook_path") != "":
-		d = rel(str("notebook_path"))
-	case str("pattern") != "":
-		d = str("pattern")
-	case str("url") != "":
-		d = str("url")
-	case str("query") != "":
-		d = str("query")
-	case str("description") != "":
-		d = str("description")
-	case str("prompt") != "":
-		d = str("prompt")
+	for _, k := range []string{"command", "commandline", "cmd"} {
+		if v := lower[k]; v != "" {
+			return oneLine(v, 200)
+		}
 	}
-	return oneLine(d, 200)
+	for _, k := range []string{"file_path", "filepath", "absolutepath", "targetfile", "notebook_path", "path"} {
+		if v := lower[k]; v != "" {
+			return oneLine(rel(v), 200)
+		}
+	}
+	for _, k := range []string{"pattern", "query", "url", "description", "prompt"} {
+		if v := lower[k]; v != "" {
+			return oneLine(v, 200)
+		}
+	}
+	return ""
 }
 
 // oneLine collapses whitespace and cuts s to n runes.
@@ -135,23 +183,70 @@ func oneLine(s string, n int) string {
 	return s
 }
 
-// RunHook handles `lazymux hook`: it records the event on stdin for the pane
-// in $TMUX_PANE. It never fails loudly, so it cannot disturb the agent.
-func RunHook(stdin io.Reader) {
+// RunHook handles `lazymux hook [agent] [event]`: it records the event on
+// stdin for the pane in $TMUX_PANE (the agent runs inside it). Without an
+// agent it is Claude Code (hooks installed by older versions). It never
+// fails loudly, so it cannot disturb the agent, and it prints the empty
+// answer the agent expects where one is required.
+func RunHook(args []string, stdin io.Reader, stdout io.Writer) {
+	agent, event := "claude", ""
+	if len(args) > 0 {
+		agent = args[0]
+	}
+	if len(args) > 1 {
+		event = args[1]
+	}
+	defer hookReply(agent, event, stdout)
+
 	pane, tmuxEnv := os.Getenv("TMUX_PANE"), os.Getenv("TMUX")
-	if pane == "" || tmuxEnv == "" {
-		return
-	}
 	raw, err := io.ReadAll(io.LimitReader(stdin, 1<<20))
-	if err != nil {
+	if err != nil || pane == "" || tmuxEnv == "" {
 		return
 	}
-	ev, ok := eventFromHook(raw, time.Now())
+	ev, ok := eventFromHook(event, raw, time.Now())
 	if !ok {
 		return
 	}
 	server, _, _ := strings.Cut(tmuxEnv, ",")
-	_ = appendEvent(EventDir(), filepath.Base(server), pane, ev)
+	dir, srv := EventDir(), filepath.Base(server)
+	if evs, _ := readEvents(eventFile(dir, srv, pane)); skipDuplicate(evs, ev) {
+		return
+	}
+	_ = appendEvent(dir, srv, pane, ev)
+}
+
+// skipDuplicate drops repeats: agy sends PreInvocation (with the same user
+// input) before every model call of a turn, opencode reports idle twice.
+func skipDuplicate(evs []Event, ev Event) bool {
+	if len(evs) == 0 {
+		return false
+	}
+	last := evs[len(evs)-1]
+	switch ev.Kind {
+	case "stop":
+		return last.Kind == "stop"
+	case "prompt":
+		for i := len(evs) - 1; i >= 0; i-- {
+			switch evs[i].Kind {
+			case "prompt":
+				return evs[i].Detail == ev.Detail
+			case "stop", "start":
+				return false
+			}
+		}
+	}
+	return false
+}
+
+// hookReply prints what an agent requires on stdout: agy wants a JSON object
+// from every hook (Stop must not block), Codex wants JSON from Stop.
+func hookReply(agent, event string, stdout io.Writer) {
+	switch {
+	case agent == "agy" && event == "Stop":
+		fmt.Fprintln(stdout, `{"decision":"allow"}`)
+	case agent == "agy", agent == "codex" && event == "Stop":
+		fmt.Fprintln(stdout, "{}")
+	}
 }
 
 // appendEvent adds ev to the pane's log. A new session (start) clears it,
@@ -211,40 +306,11 @@ func readEvents(path string) ([]Event, error) {
 	return evs, sc.Err()
 }
 
-// --- install into Claude Code settings ---------------------------------------
-
-// hookEvents are the Claude Code events lazymux listens to.
-var hookEvents = []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "Notification", "Stop", "SessionEnd"}
-
-// ClaudeSettings is the default Claude Code user settings file.
-func ClaudeSettings() string {
-	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
-		return filepath.Join(d, "settings.json")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude", "settings.json")
-}
+// --- editing agents' config files ----------------------------------------------------
 
 // isOurs reports whether a hook command is lazymux's.
 func isOurs(cmd string) bool {
-	return strings.Contains(cmd, "lazymux") && strings.HasSuffix(strings.TrimSpace(cmd), " hook")
-}
-
-// InstallHooks adds `<command>` (e.g. "'/usr/bin/lazymux' hook") as a hook
-// for each event in the settings file, replacing an older lazymux entry.
-// The previous file is kept as <file>.lazymux.bak. Returns whether anything
-// changed.
-func InstallHooks(path, command string) (bool, error) {
-	return editHooks(path, func(hooks map[string]any) {
-		for _, ev := range hookEvents {
-			groups := removeOurs(hooks[ev])
-			group := map[string]any{"hooks": []any{map[string]any{"type": "command", "command": command, "timeout": 5}}}
-			if ev == "PreToolUse" {
-				group["matcher"] = "*"
-			}
-			hooks[ev] = append(groups, group)
-		}
-	})
+	return strings.Contains(cmd, "lazymux") && (strings.HasSuffix(strings.TrimSpace(cmd), " hook") || strings.Contains(cmd, " hook "))
 }
 
 // UninstallHooks removes lazymux's hooks from the settings file.
@@ -327,25 +393,55 @@ func readSettings(path string) (map[string]any, error) {
 }
 
 func editHooks(path string, edit func(hooks map[string]any)) (bool, error) {
-	settings, err := readSettings(path)
+	return editJSON(path, func(settings map[string]any) {
+		hooks, _ := settings["hooks"].(map[string]any)
+		if hooks == nil {
+			hooks = map[string]any{}
+		}
+		edit(hooks)
+		if len(hooks) == 0 {
+			delete(settings, "hooks")
+		} else {
+			settings["hooks"] = hooks
+		}
+	})
+}
+
+// editJSON applies edit to a JSON object file (created when missing). When
+// the content changes, the old file is kept as <file>.lazymux.bak and the
+// file mode is preserved. Note that Go writes the keys sorted.
+func editJSON(path string, edit func(root map[string]any)) (bool, error) {
+	root, err := readSettings(path)
 	if err != nil {
 		return false, err
 	}
-	before, _ := json.Marshal(settings)
-	hooks, _ := settings["hooks"].(map[string]any)
-	if hooks == nil {
-		hooks = map[string]any{}
-	}
-	edit(hooks)
-	if len(hooks) == 0 {
-		delete(settings, "hooks")
-	} else {
-		settings["hooks"] = hooks
-	}
-	after, _ := json.Marshal(settings)
+	before, _ := json.Marshal(root)
+	edit(root)
+	after, _ := json.Marshal(root)
 	if bytes.Equal(before, after) {
 		return false, nil
 	}
+	out, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return false, err
+	}
+	return writeWithBackup(path, append(out, '\n'))
+}
+
+// editText applies edit to a text file (created when missing), like editJSON.
+func editText(path string, edit func(string) string) (bool, error) {
+	old, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
+	updated := edit(string(old))
+	if updated == string(old) {
+		return false, nil
+	}
+	return writeWithBackup(path, []byte(updated))
+}
+
+func writeWithBackup(path string, data []byte) (bool, error) {
 	mode := os.FileMode(0o644)
 	if st, err := os.Stat(path); err == nil {
 		mode = st.Mode().Perm()
@@ -355,12 +451,8 @@ func editHooks(path string, edit func(hooks map[string]any)) (bool, error) {
 			return false, err
 		}
 	}
-	out, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return false, err
-	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return false, err
 	}
-	return true, os.WriteFile(path, append(out, '\n'), mode)
+	return true, os.WriteFile(path, data, mode)
 }

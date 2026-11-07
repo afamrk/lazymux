@@ -45,7 +45,35 @@ var agentTabStyle = [numAgentTabs]lipgloss.Style{
 	stGreen,
 }
 
-// stateGlyph / stateStyle: ⣿ blocked (red), ⣾ working (yellow), ● idle (green).
+// agentGlyph / agentStyle: ⣿ blocked (red), ⣾ working (yellow), ● done
+// (green: finished, not looked at yet), ○ idle (dim: seen).
+func agentGlyph(a *agent.Agent) string {
+	if a.State == agent.Idle && !a.Unseen {
+		return "○"
+	}
+	return stateGlyph(a.State)
+}
+
+func agentStyle(a *agent.Agent) lipgloss.Style {
+	if a.State == agent.Idle && !a.Unseen {
+		return stFaint
+	}
+	return stateStyle(a.State)
+}
+
+// urgency orders agents for badges: blocked, working, done, idle.
+func urgency(a *agent.Agent) int {
+	switch {
+	case a.State == agent.Blocked:
+		return 3
+	case a.State == agent.Working:
+		return 2
+	case a.Done():
+		return 1
+	}
+	return 0
+}
+
 func stateGlyph(s agent.State) string {
 	switch s {
 	case agent.Blocked:
@@ -75,8 +103,33 @@ func (m *Model) detectAgents() tea.Cmd {
 		return nil
 	}
 	m.detecting = true
-	det, t := m.det, m.tree
-	return func() tea.Msg { return agentsMsg{det.Detect(t)} }
+	det, t, c, leader, notifier := m.det, m.tree, m.c, m.leader, m.notifier
+	return func() tea.Msg {
+		agents := det.Detect(t)
+		// one lazymux per server notifies and keeps the status file
+		if leader != nil && notifier != nil && leader.Acquire() {
+			cfg, now := agent.LoadConfig(c), time.Now()
+			for _, n := range notifier.Observe(agents, t, cfg, now) {
+				go agent.Deliver(c, cfg, n)
+			}
+			_ = agent.WriteStatus(c.ServerName(), agent.Count(agents, now))
+		}
+		return agentsMsg{agents}
+	}
+}
+
+// markSeen turns the selected agent from "done" into "idle" once you look
+// at it on the full Agents page.
+func (m *Model) markSeen() {
+	if m.page != pageAgents || m.compactView() {
+		return
+	}
+	if a, _ := m.curAgent(); a != nil && a.Unseen {
+		a.Unseen = false
+		if m.det != nil {
+			m.det.MarkSeen(a.Pane)
+		}
+	}
 }
 
 func (m *Model) setAgents(a map[string]*agent.Agent) tea.Cmd {
@@ -87,6 +140,7 @@ func (m *Model) setAgents(a map[string]*agent.Agent) tea.Cmd {
 	}
 	m.agents = a
 	m.normalizeAgents()
+	m.markSeen()
 	if t := m.previewTarget(); t != nil && t.ID != prev {
 		return m.fetchPreview()
 	}
@@ -98,6 +152,7 @@ func (m *Model) setAgents(a map[string]*agent.Agent) tea.Cmd {
 func (m *Model) togglePage() tea.Cmd {
 	m.page = 1 - m.page
 	m.normalizeAgents()
+	m.markSeen()
 	return m.fetchPreview()
 }
 
@@ -111,7 +166,21 @@ type agentRow struct {
 	a    *agent.Agent
 	pane *tmux.Pane
 	// header: agents of the session per state (in the current tab)
-	blocked, working, idle int
+	blocked, working, done, idle int
+}
+
+// tally counts a into a header's state counts.
+func (r *agentRow) tally(a *agent.Agent) {
+	switch {
+	case a.State == agent.Blocked:
+		r.blocked++
+	case a.State == agent.Working:
+		r.working++
+	case a.Done():
+		r.done++
+	default:
+		r.idle++
+	}
 }
 
 func inTab(a *agent.Agent, tab int) bool {
@@ -157,14 +226,7 @@ func (m *Model) agentRows() []agentRow {
 			if !inTab(a, m.agentTab) {
 				continue
 			}
-			switch a.State {
-			case agent.Blocked:
-				head.blocked++
-			case agent.Working:
-				head.working++
-			default:
-				head.idle++
-			}
+			head.tally(a)
 			group = append(group, agentRow{key: a.Pane, sess: s, a: a, pane: ps[i]})
 		}
 		if len(group) == 0 {
@@ -276,16 +338,18 @@ func (m *Model) agentCounts() [numAgentTabs]int {
 	return c
 }
 
-// agentSummary renders "⣿1 ⣾2 ●1" (states with no agents are left out).
+// agentSummary renders "⣿1 ⣾2 ●1" like `lazymux status`: blocked,
+// working and done-but-unseen agents; states with none are left out.
 func (m *Model) agentSummary() string {
-	c := m.agentCounts()
+	st := agent.Count(m.agents, clock())
 	var parts []string
 	for _, x := range []struct {
 		n     int
-		state agent.State
-	}{{c[agentBlocked], agent.Blocked}, {c[agentWorking], agent.Working}, {c[agentDone], agent.Idle}} {
+		glyph string
+		style lipgloss.Style
+	}{{st.Blocked, "⣿", stRed}, {st.Working, "⣾", stYellow}, {st.Done, "●", stGreen}} {
 		if x.n > 0 {
-			parts = append(parts, stateStyle(x.state).Render(fmt.Sprintf("%s%d", stateGlyph(x.state), x.n)))
+			parts = append(parts, x.style.Render(fmt.Sprintf("%s%d", x.glyph, x.n)))
 		}
 	}
 	return strings.Join(parts, " ")
@@ -345,6 +409,7 @@ func (m *Model) handleAgentKey(k string) (bool, tea.Cmd) {
 	default:
 		return false, nil
 	}
+	m.markSeen()
 	if m.agentSel != prev {
 		return true, m.fetchPreview()
 	}
@@ -495,8 +560,10 @@ func headerBadge(r agentRow) seg {
 		return seg{fmt.Sprintf("⣿%d ", r.blocked), stRed}
 	case r.working > 0:
 		return seg{fmt.Sprintf("⣾%d ", r.working), stYellow}
+	case r.done > 0:
+		return seg{fmt.Sprintf("●%d ", r.done), stGreen}
 	}
-	return seg{"● ", stGreen}
+	return seg{"○ ", stFaint}
 }
 
 // agentLines renders one row of the agent list (1 line for a header, 2 for
@@ -510,13 +577,13 @@ func (m *Model) agentLines(r agentRow, w, sel int) []string {
 		return []string{renderRow([]seg{{" " + arrow, stFaint}, {r.sess.Name, stText.Bold(true)}}, []seg{headerBadge(r)}, w, sel)}
 	}
 	a, p := r.a, r.pane
-	st := stateStyle(a.State)
+	st := agentStyle(a)
 	kind := stText.Bold(true)
 	if m.agentFocus != agentPanelList {
 		kind = stSub.Bold(true)
 	}
 	l1 := renderRow(
-		[]seg{{" ", stText}, {stateGlyph(a.State) + " ", st}, {string(a.Kind) + " ", kind},
+		[]seg{{" ", stText}, {agentGlyph(a) + " ", st}, {string(a.Kind) + " ", kind},
 			{fmt.Sprintf("%d:%s", p.Window.Index, p.Window.Name), stSub}},
 		[]seg{{a.Label() + " " + agent.Age(a.Since, clock()) + " ", st}}, w, sel)
 
@@ -620,13 +687,13 @@ func (m *Model) viewActivity(w, h int) string {
 
 	if !a.Hooked {
 		var lines []string
-		if a.Kind == agent.Claude {
+		if _, ok := agent.IntegrationFor(string(a.Kind)); ok {
 			lines = []string{
 				" " + stFaint.Render("no events yet. Run ") + stKey.Render("lazymux hooks install"),
 				" " + stFaint.Render("to see prompts and tool calls here."),
 			}
 		} else {
-			lines = []string{" " + stFaint.Render("the timeline needs hooks; only Claude Code has them")}
+			lines = []string{" " + stFaint.Render(string(a.Kind)+" has no hooks; its state comes from the screen")}
 		}
 		return renderBox(title, "", lines, w, h, focused)
 	}
@@ -689,7 +756,7 @@ func (m *Model) viewAgentsPreview(w, h int) string {
 		return renderBox(stSub.Render("preview "), "", []string{stFaint.Render(" select an agent to see its pane")}, w, h, false)
 	}
 	title := titleRight(stText.Render(p.Target())+stFaint.Render(" · ")+stSub.Render(string(a.Kind))+" ",
-		" "+stateStyle(a.State).Render(stateGlyph(a.State)+" "+a.Label()+" "+agent.Age(a.Since, clock()))+" ", w, cSurface1)
+		" "+agentStyle(a).Render(agentGlyph(a)+" "+a.Label()+" "+agent.Age(a.Since, clock()))+" ", w, cSurface1)
 	var lines []string
 	if m.previewFor == p.ID {
 		lines = tmux.TrimCapture(m.preview, h-2)
@@ -738,7 +805,7 @@ var clock = time.Now
 func (m *Model) worstAgent(panes []*tmux.Pane) *agent.Agent {
 	var worst *agent.Agent
 	for _, p := range panes {
-		if a := m.agents[p.ID]; a != nil && (worst == nil || a.State > worst.State) {
+		if a := m.agents[p.ID]; a != nil && (worst == nil || urgency(a) > urgency(worst)) {
 			worst = a
 		}
 	}
@@ -753,14 +820,7 @@ func (m *Model) sessionBadge(s *tmux.Session) []seg {
 	}
 	r := agentRow{}
 	for _, a := range as {
-		switch a.State {
-		case agent.Blocked:
-			r.blocked++
-		case agent.Working:
-			r.working++
-		default:
-			r.idle++
-		}
+		r.tally(a)
 	}
 	return []seg{headerBadge(r)}
 }
@@ -768,7 +828,7 @@ func (m *Model) sessionBadge(s *tmux.Session) []seg {
 // windowBadge is the glyph of the window's most urgent agent.
 func (m *Model) windowBadge(w *tmux.Window) []seg {
 	if a := m.worstAgent(w.Panes); a != nil {
-		return []seg{{stateGlyph(a.State) + " ", stateStyle(a.State)}}
+		return []seg{{agentGlyph(a) + " ", agentStyle(a)}}
 	}
 	return nil
 }

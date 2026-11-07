@@ -206,7 +206,7 @@ func (m *Model) compactTmux(w int, curSess *tmux.Session, curWin *tmux.Window) [
 			}
 			var right []seg
 			if a := m.worstAgent(win.Panes); a != nil {
-				right = []seg{{stateGlyph(a.State) + " " + agent.Age(a.Since, clock()) + " ", stateStyle(a.State)}}
+				right = []seg{{agentGlyph(a) + " " + agent.Age(a.Since, clock()) + " ", agentStyle(a)}}
 			} else if p := win.ActivePane(); p != nil {
 				right = []seg{{p.Command + " ", stFaint}}
 			}
@@ -216,11 +216,11 @@ func (m *Model) compactTmux(w int, curSess *tmux.Session, curWin *tmux.Window) [
 	}
 	lines = append(lines, "", divider(" agents ", w))
 	n := 0
-	for _, st := range []agent.State{agent.Blocked, agent.Working, agent.Idle} {
+	for rank := 3; rank >= 0; rank-- { // blocked, working, done, idle
 		for _, s := range m.sessions() {
 			as, ps := m.sessionAgents(s)
 			for i, a := range as {
-				if a.State == st {
+				if urgency(a) == rank {
 					lines = append(lines, m.compactAgentEntry(a, ps[i], w, true)...)
 					n++
 				}
@@ -241,13 +241,13 @@ func (m *Model) compactTmux(w int, curSess *tmux.Session, curWin *tmux.Window) [
 // The location includes the session when withSession is set (the agents
 // section lists agents of every session together).
 func (m *Model) compactAgentEntry(a *agent.Agent, p *tmux.Pane, w int, withSession bool) []string {
-	st := stateStyle(a.State)
+	st := agentStyle(a)
 	loc := fmt.Sprintf("%d:%s", p.Window.Index, p.Window.Name)
 	if withSession {
 		loc = fmt.Sprintf("%s:%d", p.Window.Session.Name, p.Window.Index)
 	}
 	out := []string{renderRow(
-		[]seg{{" " + stateGlyph(a.State) + " ", st}, {string(a.Kind), stText.Bold(true)}},
+		[]seg{{" " + agentGlyph(a) + " ", st}, {string(a.Kind), stText.Bold(true)}},
 		[]seg{{loc + "  ", stFaint}, {agent.Age(a.Since, clock()) + " ", st}}, w, 0)}
 	var parts []string
 	if a.Summary != "" {

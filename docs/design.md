@@ -34,6 +34,7 @@ Control tmux and the coding agents running in it easily, on a laptop screen (abo
 | attached session, success | green `#a6e3a1` |
 | danger, errors, blocked agents | red `#f38ba8` |
 | working agents | yellow `#f9e2af` |
+| done (finished, unseen) agents | green `#a6e3a1` `●`; seen idle agents are dim `○` |
 | selection `◆`, active `*`, help border, jump palette | mauve `#cba6f7` |
 | filter matches | peach `#fab387` bold |
 | pane ids, help group headers | peach `#fab387` |

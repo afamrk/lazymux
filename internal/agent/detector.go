@@ -106,15 +106,20 @@ func (d *Detector) Detect(t *tmux.Tree) map[string]*Agent {
 				st = Working
 			}
 		}
-		if f.kind == Claude {
-			d.loadEvents(tr)
+		d.loadEvents(tr)
+		// agy shows no reliable "working" line; its hooks say when a turn
+		// runs (a prompt or tool call not yet followed by a stop)
+		if f.kind == Agy && st == Idle && hookTurnRunning(tr.a.Events) {
+			st = Working
 		}
 		a := &tr.a
 		if st != a.State {
+			// finishing while you are not looking leaves it "done" (unseen)
+			a.Unseen = st == Idle && !fresh && !Visible(f.pane)
 			a.State, a.Since = st, now
 		}
-		if st == Working {
-			a.Worked = true
+		if Visible(f.pane) {
+			a.Unseen = false
 		}
 		a.Waiting = ""
 		if st == Blocked {
@@ -130,7 +135,6 @@ func (d *Detector) Detect(t *tmux.Tree) map[string]*Agent {
 		a.Summary = ""
 		if e := lastOf(a.Events, "prompt"); e != nil {
 			a.Summary = e.Detail
-			a.Worked = true
 		} else if f.kind == Claude {
 			a.Summary = titleSummary(f.pane.Title)
 		}
@@ -144,6 +148,22 @@ func (d *Detector) Detect(t *tmux.Tree) map[string]*Agent {
 		}
 	}
 	return out
+}
+
+// Visible reports whether you can see a pane: its window is the current
+// window of a session a client is attached to.
+func Visible(p *tmux.Pane) bool {
+	return p.Window.Active && p.Window.Session.Attached
+}
+
+// MarkSeen turns a "done" agent into "idle" (e.g. it was selected on the
+// Agents page).
+func (d *Detector) MarkSeen(pane string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if tr := d.known[pane]; tr != nil {
+		tr.a.Unseen = false
+	}
 }
 
 // loadEvents re-reads the pane's hook log when it changed.
@@ -173,6 +193,19 @@ func lastEvent(evs []Event) *Event {
 		return nil
 	}
 	return &evs[len(evs)-1]
+}
+
+// hookTurnRunning reports whether the hook log shows a turn in progress.
+func hookTurnRunning(evs []Event) bool {
+	for i := len(evs) - 1; i >= 0; i-- {
+		switch evs[i].Kind {
+		case "prompt", "tool":
+			return true
+		case "stop", "start", "end":
+			return false
+		}
+	}
+	return false
 }
 
 // PendingTool is the index of the last tool call when nothing but
