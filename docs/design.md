@@ -34,7 +34,8 @@ Control tmux and the coding agents running in it easily, on a laptop screen (abo
 | attached session, success | green `#a6e3a1` |
 | danger, errors, blocked agents | red `#f38ba8` |
 | working agents | yellow `#f9e2af` |
-| marks, active `*`, help border | mauve `#cba6f7` |
+| selection `◆`, active `*`, help border, jump palette | mauve `#cba6f7` |
+| filter matches | peach `#fab387` bold |
 | pane ids, help group headers | peach `#fab387` |
 | text / dim text / faint | `#cdd6f4` / `#a6adc8` / `#6c7086` |
 | selection background | `#313244` (focused), `#2a2b3d` (unfocused) |
@@ -51,7 +52,8 @@ Control tmux and the coding agents running in it easily, on a laptop screen (abo
 | help | lazymux - Keybindings Help Modal | built (P1) |
 | sidebar, unfocused | lazymux - Sidebar (Laptop 1280x800) | built |
 | sidebar, focused at 60% | lazymux - Sidebar Focused (60%) (Laptop 1280x800) | built |
-| filter / multi-select | – | to design (P2) |
+| filter, multi-select, move picker | lazymux - Filter, Multi-select & Move Picker (Laptop 1280x800) | built (P2) |
+| jump anywhere | lazymux - Jump Anywhere (ctrl+p) (Laptop 1280x800) | built (P2) |
 | project picker / worktree | – | to design (P5) |
 
 Stitch sometimes changed the background behind dialogs (adding a top bar, dropping panel borders). Only the dialogs themselves are the design; in the app they float over the normal main view.
@@ -61,6 +63,7 @@ Stitch sometimes changed the background behind dialogs (adding a top bar, droppi
 - The main-view mockup still shows the old `Sessions │ Agents` tab title; the app shows `[1] Sessions` and the `tmux │ agents` indicator.
 - The Agents page mockup adds a cwd / PID line and a styled permission box to the preview; the app shows the raw pane only.
 - The sidebar mockups show agent badges, a summary in the header and agent rows; until P3 the app shows "detection arrives in P3" there. The compact view expands every session (the current one in bold).
+- The P2 filter mockup has an invented top bar and tab strip; the app has none. Selected rows use the existing one-column gutter for `◆`.
 - The mockups show agent badges (`⣿1`, `blocked 2m`) on session and window rows; they arrive with agent detection in P3.
 - The confirm dialog lists running programs (`running: go, nvim`) where the mockup showed an agent warning; the agent-specific warning comes in P3.
 - The new-window dialog has no "start in" choice: it always creates a window in the selected session.

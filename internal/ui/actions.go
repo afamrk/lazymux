@@ -11,23 +11,15 @@ import (
 	"github.com/afamrk/lazymux/internal/tmux"
 )
 
-// markRef is the item marked with space; it is the target of move / swap.
-type markRef struct {
-	panel int // panelSessions / panelWindows / panelPanes
-	sess  string
-	id    string // session, window or pane id
-	label string
-}
-
 // actionMsg reports the result of a tmux action. Non-empty sel* ids move the
 // selection (e.g. to a newly created window).
 type actionMsg struct {
 	toast                  string
 	err                    error
 	selSess, selWin, selPn string
-	clearMark              bool
-	undo                   *tmux.Snapshot // pushed on success (kills)
-	popUndo                bool           // undo applied: drop the snapshot
+	clearSel               bool
+	undo                   []*tmux.Snapshot // pushed as one undo step on success (kills)
+	popUndo                bool             // undo applied: drop the step
 }
 
 type toastState struct {
@@ -60,10 +52,10 @@ func (m *Model) handleAction(msg actionMsg) tea.Cmd {
 	} else if msg.selPn != "" {
 		m.selPane = msg.selPn
 	}
-	if msg.clearMark {
-		m.mark = nil
+	if msg.clearSel {
+		m.selected = nil
 	}
-	if msg.undo != nil {
+	if len(msg.undo) > 0 {
 		m.undo = append(m.undo, msg.undo)
 		if len(m.undo) > 20 {
 			m.undo = m.undo[1:]
@@ -186,168 +178,158 @@ func running(panes []*tmux.Pane) []string {
 	return out
 }
 
+// killCmd kills the selected items (or the cursor item) after a confirm.
+// All of them form one undo step.
 func (m *Model) killCmd() tea.Cmd {
-	s, _, w, _, p, _ := m.cur()
-	if s == nil {
+	refs := m.targets()
+	if len(refs) == 0 || m.tree == nil {
 		return nil
 	}
 	c := m.c
-	var (
-		title string
-		body  []string
+	type victim struct {
+		label string
 		panes []*tmux.Pane
 		snap  *tmux.Snapshot
 		do    func() error
-	)
-	switch m.focus {
-	case panelSessions:
-		for _, x := range s.Windows {
-			panes = append(panes, x.Panes...)
-		}
-		title = "Kill session?"
-		body = []string{
-			" Kill session " + stText.Bold(true).Render(s.Name) + " and everything in it?", "",
-			stSub.Render(fmt.Sprintf("   %d windows · %d panes", len(s.Windows), len(panes))),
-		}
-		snap = tmux.SnapSession(s)
-		do = func() error { return c.KillSession(s.ID) }
-	case panelWindows:
-		panes = w.Panes
-		title = "Kill window?"
-		body = []string{
-			" Kill window " + stText.Bold(true).Render(fmt.Sprintf("%d:%s", w.Index, w.Name)) + " of " + s.Name + "?", "",
-			stSub.Render(fmt.Sprintf("   %d panes", len(w.Panes))),
-		}
-		snap = tmux.SnapWindow(w)
-		do = func() error { return c.KillWindow(s.ID, w.ID) }
-	case panelPanes:
-		panes = []*tmux.Pane{p}
-		title = "Kill pane?"
-		body = []string{" Kill pane " + stText.Bold(true).Render(p.ID) + " (" + p.Command + ")?"}
-		snap = tmux.SnapPane(p)
-		do = func() error { return c.KillPane(p.ID) }
 	}
-	for _, x := range panes {
+	var vs []victim
+	for _, r := range refs {
+		var v victim
+		switch r.panel {
+		case panelSessions:
+			s := findSession(m.tree, r.id)
+			if s == nil {
+				continue
+			}
+			for _, x := range s.Windows {
+				v.panes = append(v.panes, x.Panes...)
+			}
+			v.label = fmt.Sprintf("session %s (%d windows, %d panes)", s.Name, len(s.Windows), len(v.panes))
+			v.snap = tmux.SnapSession(s)
+			id := s.ID
+			v.do = func() error { return c.KillSession(id) }
+		case panelWindows:
+			s, w := findWindow(m.tree, r.sess, r.id)
+			if w == nil {
+				continue
+			}
+			v.panes = w.Panes
+			v.label = fmt.Sprintf("window %d:%s of %s (%d panes)", w.Index, w.Name, s.Name, len(w.Panes))
+			v.snap = tmux.SnapWindow(w)
+			sid, wid := s.ID, w.ID
+			v.do = func() error { return c.KillWindow(sid, wid) }
+		case panelPanes:
+			w := paneWindow(m.tree, r.id)
+			if w == nil {
+				continue
+			}
+			var p *tmux.Pane
+			for _, x := range w.Panes {
+				if x.ID == r.id {
+					p = x
+				}
+			}
+			v.panes = []*tmux.Pane{p}
+			v.label = fmt.Sprintf("pane %s (%s)", p.ID, p.Command)
+			v.snap = tmux.SnapPane(p)
+			id := p.ID
+			v.do = func() error { return c.KillPane(id) }
+		}
+		vs = append(vs, v)
+	}
+	if len(vs) == 0 {
+		return nil
+	}
+	var all []*tmux.Pane
+	for _, v := range vs {
+		all = append(all, v.panes...)
+	}
+	for _, x := range all {
 		if x.ID == m.selfPane {
 			return m.setToast("✗ that would kill lazymux itself", true)
 		}
 	}
-	if r := running(panes); len(r) > 0 {
-		body = append(body, stRed.Render("   running: "+strings.Join(r, ", ")))
+
+	what := []string{"session", "window", "pane"}[refs[0].panel]
+	title := "Kill " + what + "?"
+	var body []string
+	if len(vs) == 1 {
+		body = []string{" Kill " + stText.Bold(true).Render(vs[0].label) + "?"}
+	} else {
+		title = fmt.Sprintf("Kill %d %ss?", len(vs), what)
+		body = []string{fmt.Sprintf(" Kill these %d %ss and everything in them?", len(vs), what), ""}
+		for i, v := range vs {
+			if i == 5 {
+				body = append(body, stSub.Render(fmt.Sprintf("   … and %d more", len(vs)-5)))
+				break
+			}
+			body = append(body, stSub.Render("   ◆ "+v.label))
+		}
+	}
+	if r := running(all); len(r) > 0 {
+		body = append(body, "", stRed.Render("   running: "+strings.Join(r, ", ")))
 	}
 	m.modal = &confirmModal{
 		title: title, body: body,
 		onYes: func() tea.Cmd {
 			return func() tea.Msg {
-				if err := do(); err != nil {
-					return actionMsg{err: err}
+				var snaps []*tmux.Snapshot
+				for _, v := range vs {
+					if err := v.do(); err != nil {
+						return actionMsg{err: err, undo: snaps, clearSel: true}
+					}
+					snaps = append(snaps, v.snap)
 				}
-				return actionMsg{toast: "✓ killed " + snap.Label + " · u to undo", undo: snap, clearMark: true}
+				label := snaps[0].Label
+				if len(snaps) > 1 {
+					label = fmt.Sprintf("%d %ss", len(snaps), what)
+				}
+				return actionMsg{toast: "✓ killed " + label + " · u to undo", undo: snaps, clearSel: true}
 			}
 		},
 	}
 	return nil
 }
 
+func findSession(t *tmux.Tree, id string) *tmux.Session {
+	for _, s := range t.Sessions {
+		if s.ID == id {
+			return s
+		}
+	}
+	return nil
+}
+
+func findWindow(t *tmux.Tree, sess, id string) (*tmux.Session, *tmux.Window) {
+	s := findSession(t, sess)
+	if s == nil {
+		return nil, nil
+	}
+	for _, w := range s.Windows {
+		if w.ID == id {
+			return s, w
+		}
+	}
+	return s, nil
+}
+
 func (m *Model) undoCmd() tea.Cmd {
 	if len(m.undo) == 0 {
 		return m.setToast("nothing to undo", false)
 	}
-	snap, c := m.undo[len(m.undo)-1], m.c
+	step, c := m.undo[len(m.undo)-1], m.c
 	return func() tea.Msg {
-		if err := c.Restore(snap); err != nil {
-			return actionMsg{err: fmt.Errorf("undo %s: %w", snap.Label, err)}
+		for i := len(step) - 1; i >= 0; i-- {
+			if err := c.Restore(step[i]); err != nil {
+				return actionMsg{err: fmt.Errorf("undo %s: %w", step[i].Label, err)}
+			}
 		}
-		return actionMsg{toast: "✓ restored " + snap.Label, popUndo: true}
-	}
-}
-
-// --- mark / move / swap ----------------------------------------------------
-
-func (m *Model) toggleMark() tea.Cmd {
-	s, _, w, _, p, _ := m.cur()
-	if s == nil {
-		return nil
-	}
-	ref := markRef{panel: m.focus, sess: s.ID}
-	switch m.focus {
-	case panelSessions:
-		ref.id, ref.label = s.ID, "session "+s.Name
-	case panelWindows:
-		ref.id, ref.label = w.ID, fmt.Sprintf("window %s:%d", s.Name, w.Index)
-	case panelPanes:
-		ref.id, ref.label = p.ID, "pane "+p.ID
-	}
-	if m.mark != nil && *m.mark == ref {
-		m.mark = nil
-		return nil
-	}
-	m.mark = &ref
-	return nil
-}
-
-func (m *Model) isMarked(panel int, id string) bool {
-	return m.mark != nil && m.mark.panel == panel && m.mark.id == id
-}
-
-const markHint = "mark a target first with space"
-
-func (m *Model) moveCmd() tea.Cmd {
-	s, _, w, _, p, _ := m.cur()
-	if s == nil {
-		return nil
-	}
-	c, mk := m.c, m.mark
-	switch {
-	case m.focus == panelWindows && mk != nil && mk.panel == panelSessions:
-		if mk.id == s.ID {
-			return m.setToast("window is already in that session", true)
+		label := step[0].Label
+		if len(step) > 1 {
+			label = fmt.Sprintf("%d items", len(step))
 		}
-		return func() tea.Msg {
-			err := c.MoveWindow(s.ID, w.ID, mk.id)
-			return actionMsg{err: err, toast: fmt.Sprintf("✓ moved window %s to %s", w.Name, mk.label), clearMark: true, selSess: mk.id, selWin: w.ID}
-		}
-	case m.focus == panelPanes && mk != nil && (mk.panel == panelWindows || mk.panel == panelPanes):
-		target := mk.id
-		if mk.panel == panelWindows {
-			target = mk.sess + ":" + mk.id
-		}
-		if mk.id == p.ID || (mk.panel == panelWindows && mk.id == w.ID) {
-			return m.setToast("pane is already there", true)
-		}
-		return func() tea.Msg {
-			err := c.JoinPane(p.ID, target)
-			return actionMsg{err: err, toast: "✓ joined " + p.ID + " into " + mk.label, clearMark: true}
-		}
-	case m.focus == panelWindows:
-		return m.setToast("move window: "+markHint+" on a session", true)
-	case m.focus == panelPanes:
-		return m.setToast("join pane: "+markHint+" on a window or pane", true)
+		return actionMsg{toast: "✓ restored " + label, popUndo: true}
 	}
-	return m.setToast("m works on windows and panes", true)
-}
-
-func (m *Model) swapCmd() tea.Cmd {
-	s, _, w, _, p, _ := m.cur()
-	if s == nil {
-		return nil
-	}
-	c, mk := m.c, m.mark
-	switch {
-	case m.focus == panelWindows && mk != nil && mk.panel == panelWindows && mk.id != w.ID:
-		return func() tea.Msg {
-			err := c.SwapWindows(s.ID, w.ID, mk.sess, mk.id)
-			return actionMsg{err: err, toast: "✓ swapped window " + w.Name + " with " + mk.label, clearMark: true}
-		}
-	case m.focus == panelPanes && mk != nil && mk.panel == panelPanes && mk.id != p.ID:
-		return func() tea.Msg {
-			err := c.SwapPanes(p.ID, mk.id)
-			return actionMsg{err: err, toast: "✓ swapped " + p.ID + " with " + mk.id, clearMark: true}
-		}
-	case m.focus == panelWindows || m.focus == panelPanes:
-		return m.setToast("swap: "+markHint+" on another item in this panel", true)
-	}
-	return m.setToast("s works on windows and panes", true)
 }
 
 // --- pane / window commands ------------------------------------------------

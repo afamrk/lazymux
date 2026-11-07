@@ -15,8 +15,8 @@ Legend: ✅ available · 🔜 planned (phase in brackets)
 | `tab`, `l`, `→` | next panel | ✅ |
 | `shift+tab`, `h`, `←` | previous panel | ✅ |
 | `1` `2` `3` | jump to panel | ✅ |
-| `/` | filter the focused list | 🔜 P2 |
-| `ctrl+p` | jump anywhere: fuzzy search over all sessions / windows / panes | 🔜 P2 |
+| `/` | filter the focused list (fuzzy; `enter` keeps it, `esc` clears it) | ✅ |
+| `ctrl+p` | jump anywhere: fuzzy search over all sessions / windows / panes | ✅ |
 
 ## Sessions, windows and panes
 
@@ -27,10 +27,10 @@ What a key does depends on the focused panel.
 | `enter` | switch to session | switch to window | switch to pane | ✅ |
 | `n` | new session (dialog) | new window (dialog) | split side by side | ✅ |
 | `r` | rename session | rename window | set pane title | ✅ |
-| `d` | kill session (confirm) | kill window (confirm) | kill pane (confirm) | ✅ |
-| `u` | undo last kill | undo last kill | undo last kill | ✅ |
-| `m` | – | move to marked session | join into marked window / pane | ✅ |
-| `s` | – | swap with marked window | swap with marked pane | ✅ |
+| `d` | kill selected sessions / cursor (confirm) | kill selected windows / cursor (confirm) | kill selected panes / cursor (confirm) | ✅ |
+| `u` | undo last kill (a bulk kill is one step) | ← | ← | ✅ |
+| `m` | – | move selected windows / cursor to a session (picker) | join selected panes / cursor into a window (picker) | ✅ |
+| `s` | – | swap the one selected window with the cursor | swap the one selected pane with the cursor | ✅ |
 | `b` | – | – | break out to its own window | ✅ |
 | `z` | – | – | zoom / un-zoom | ✅ |
 | `L` | – | next layout | next layout (of its window) | ✅ |
@@ -39,10 +39,9 @@ What a key does depends on the focused panel.
 
 | key | action | |
 | --- | --- | --- |
-| `space` | mark / unmark the selected item (target for `m` / `s`) | ✅ |
-| `esc` | clear the mark (quits when nothing is marked) | ✅ |
-| `space` (several items) | mark many items for bulk kill / move | 🔜 P2 |
-| `v` | mark a range | 🔜 P2 |
+| `space` | select / unselect the cursor item (several allowed, one panel at a time) | ✅ |
+| `v` | select every item from the last `space` to the cursor | ✅ |
+| `esc` | clear the selection, then the filter (then quit / back to your pane) | ✅ |
 
 ## Agents
 
@@ -65,7 +64,7 @@ These work on the Agents page (`a` switches pages). There, `tab` / `h` / `l` swi
 | --- | --- | --- |
 | `?` | help / keybindings | ✅ |
 | `q`, `ctrl+c` | quit (in the sidebar `q` goes back to your pane instead) | ✅ |
-| `esc` | sidebar: back to your pane (clears a mark first) | ✅ |
+| `esc` | sidebar: back to your pane (clears the selection, then the filter first) | ✅ |
 | `Q` | sidebar: turn sidebars off everywhere | ✅ |
 | `prefix` + `b` | tmux binding: turn the sidebar on / off (`lazymux sidebar toggle`) | ✅ |
 | `N` | open a project (sessionizer) | 🔜 P5 |
@@ -76,4 +75,6 @@ These work on the Agents page (`a` switches pages). There, `tab` / `h` / `l` swi
 | --- | --- |
 | input (new / rename) | `enter` confirm · `esc` cancel · `tab` complete dir or next field · `ctrl+f` pick the dir with fzf (when installed) · `shift+tab` / `↑` previous field · `←` `→` `space` change the choice row |
 | confirm kill | `y` yes · `n` / `esc` / `q` no · `←` `→` `tab` move between choices · `enter` pick the highlighted choice (default: No) |
+| picker (`m`, `ctrl+p`) | type to filter · `↑` `↓` / `ctrl+j` `ctrl+k` move · `enter` pick · `tab` select only (ctrl+p) · `esc` close |
+| filter line (`/`) | type to filter · `↑` `↓` move · `enter` keep the filter · `esc` clear it |
 | help | `j` / `k` move · `enter` run · `/` filter · `esc` clear filter / close · `q` / `?` close |

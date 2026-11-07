@@ -43,7 +43,7 @@ Focused (60% of the window):
 | P0 | Panels, live preview, switching | ✅ done |
 | P1 | New / rename / kill + undo / move / swap / break / zoom / layout, dialogs, help | ✅ done |
 | Sidebar | Docked left pane that follows you; compact when unfocused, full UI at 60% when focused | ✅ done |
-| P2 | `/` filter, multi-select, jump anywhere (`ctrl+p`) | planned |
+| P2 | `/` filter, multi-select + bulk kill / move, jump anywhere (`ctrl+p`) | ✅ done |
 | P3 | Agents page (`a`): state tabs All / Blocked / Working / Done, agents grouped by session, blocked / working / idle, answer from lazymux | planned |
 | P4 | Desktop notifications, `lazymux status` for the tmux status line | planned |
 | P5 | Project picker (sessionizer), git worktree + agent spawn | planned |
@@ -93,8 +93,10 @@ You can still run plain `lazymux` in a terminal, full screen: inside tmux `enter
 | `enter` | switch to the selection |
 | `n` | new session / window / pane (depends on panel) |
 | `r` | rename |
-| `d` | kill (asks first) · `u` undo |
-| `space` then `m` / `s` | mark a target, then move / swap onto it |
+| `d` | kill selection or cursor item (asks first) · `u` undo |
+| `/` · `ctrl+p` | filter the panel · jump anywhere |
+| `space` / `v` | select items / a range |
+| `m` · `s` | move selection to… (picker) · swap selected with cursor |
 | `z` · `b` · `L` | zoom · break pane out · next layout |
 | `a` | switch page: tmux ⇄ agents |
 | `?` | all keys (filterable, runnable) |

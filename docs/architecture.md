@@ -12,9 +12,12 @@ internal/tmux/             everything that talks to tmux
   sidebar.go               sidebar panes: toggle, follow / re-dock, off, hooks, focus and size queries
 internal/ui/               the terminal UI (Bubble Tea model)
   app.go                   Model: selection, focus, refresh loop, key routing, layout and panel rendering
-  actions.go               what each action key does: dialogs, marks, toasts, undo stack
+  actions.go               what each action key does: dialogs, bulk kill, toasts, undo stack
   sidebar.go               sidebar mode: focus handling, width changes, compact view
   agents.go                the Agents page: page switch (`a`), state tabs, its panels and keys
+  selection.go             per-panel filters (/) and visible lists, multi-selection (space / v), action targets
+  picker.go                fuzzy picker dialog: move target (m), jump anywhere (ctrl+p); swap
+  fuzzy.go                 fuzzy matcher (subsequence + bonuses) and match highlighting
   fzf.go                   ctrl+f directory picker in dialogs (fzf over zoxide + fd)
   modal.go                 dialogs (input, confirm, help) + overlay / dim helpers
   panel.go                 renderRow (one list row), renderFrame / renderBox (bordered boxes), scrolling
@@ -46,6 +49,7 @@ internal/ui/               the terminal UI (Bubble Tea model)
 - **One query for everything.** `list-panes -a` with a format string returns one line per pane carrying its session and window fields too. `ParseTree` folds that into sessions → windows → panes, keeping tmux's order.
 - **Field separator is a tab.** tmux escapes control characters such as `\x1f` in format output (it prints `\037`), but passes tabs through. `pane_title` is the last field and is split with `SplitN`, so titles may contain tabs.
 - **Linked windows.** A window linked into two sessions appears under both; windows are keyed by session id + window id.
+- **Filtered lists.** `cur()` and `move()` work on `visSessions` / `visWindows` / `visPanes`, the lists after each panel's filter, so the cursor never lands on a hidden item and indices in the view are positions in the filtered list.
 - **Selection by id, not index.** The model stores the selected session, window and pane ids. After every refresh, `cur()` resolves them back to items, falling back to the session's active window and the window's active pane when an id has disappeared. This keeps the cursor stable while things are created, killed or reordered.
 - **All tmux calls run inside `tea.Cmd`s**, off the UI goroutine. Results come back as messages (`treeMsg`, `previewMsg`, `actionMsg`, `switchMsg`).
 
@@ -92,7 +96,7 @@ Bubble Tea delivers runes that arrive in the same read as **one** `KeyMsg` (for 
 
 ## Undo
 
-Before a kill, `SnapSession` / `SnapWindow` / `SnapPane` record names, the window index, the layout string, and per pane the directory and a re-run command (`rerunCommand`: shells and interpreters are skipped, `claude` → `claude --continue`, `codex` → `codex resume --last`, anything else re-runs by name). `Restore` recreates the items with `new-session` / `new-window` / `split-window -c <dir>`, applies the layout, and types the commands with `send-keys`, so a shell stays behind when the program exits. The stack holds 20 snapshots in memory.
+Before a kill, `SnapSession` / `SnapWindow` / `SnapPane` record names, the window index, the layout string, and per pane the directory and a re-run command (`rerunCommand`: shells and interpreters are skipped, `claude` → `claude --continue`, `codex` → `codex resume --last`, anything else re-runs by name). `Restore` recreates the items with `new-session` / `new-window` / `split-window -c <dir>`, applies the layout, and types the commands with `send-keys`, so a shell stays behind when the program exits. The stack holds 20 steps in memory; a bulk kill is one step holding several snapshots, restored in reverse order.
 
 ## Sidebar
 

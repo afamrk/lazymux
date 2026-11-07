@@ -91,12 +91,107 @@ func TestHelpRunsSelectedBinding(t *testing.T) {
 	}
 }
 
-func TestMoveWithoutMarkExplains(t *testing.T) {
+func TestSwapNeedsOneSelected(t *testing.T) {
 	m := newTestModel(t)
 	m.Update(key("2"))
-	m.Update(key("m"))
-	if !strings.Contains(m.toast.text, "mark a target first") {
+	m.Update(key("s"))
+	if !strings.Contains(m.toast.text, "select one item") {
 		t.Errorf("toast = %q", m.toast.text)
+	}
+}
+
+func TestFuzzyMatch(t *testing.T) {
+	if _, idx, ok := fuzzyMatch("apicl", "api:3 claude"); !ok || len(idx) != 5 || idx[3] != 6 {
+		t.Errorf("apicl vs api:3 claude: ok=%v idx=%v", ok, idx)
+	}
+	if _, _, ok := fuzzyMatch("xyz", "claude"); ok {
+		t.Error("xyz must not match claude")
+	}
+	a, _, _ := fuzzyMatch("cla", "claude")
+	b, _, _ := fuzzyMatch("cla", "c-l-a")
+	if a <= b {
+		t.Errorf("consecutive match should score higher: %d <= %d", a, b)
+	}
+}
+
+func TestFilterNarrowsAndEscClears(t *testing.T) {
+	m := newTestModel(t)
+	m.Update(key("1"))
+	m.Update(key("/"))
+	m.Update(key("no")) // typed into the filter, not run as keys
+	if vs := m.visSessions(); len(vs) != 1 || vs[0].Name != "notes" || m.selSess != "$1" {
+		t.Fatalf("filter 'no': visible=%d sel=%s", len(vs), m.selSess)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.filtering || !strings.Contains(m.View(), "/ no") {
+		t.Fatalf("enter should keep the filter line:\n%s", m.View())
+	}
+	m.Update(key("j")) // navigation works again, stays inside the filtered list
+	if m.selSess != "$1" {
+		t.Errorf("j moved outside the filter: %s", m.selSess)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.filter[panelSessions] != "" || len(m.visSessions()) != 3 || m.selSess != "$1" {
+		t.Errorf("esc should clear the filter and keep notes selected")
+	}
+}
+
+func TestSelectRangeAndBulkKillDialog(t *testing.T) {
+	m := newTestModel(t)
+	m.Update(key("1"))
+	m.Update(key("g"))
+	m.Update(key(" "))
+	m.Update(key("G"))
+	m.Update(key("v"))
+	if len(m.selected) != 3 {
+		t.Fatalf("selected = %d, want 3", len(m.selected))
+	}
+	if !strings.Contains(m.View(), "3 selected") {
+		t.Errorf("footer/bar should show 3 selected")
+	}
+	m.Update(key("d"))
+	d, ok := m.modal.(*confirmModal)
+	if !ok || d.title != "Kill 3 sessions?" {
+		t.Fatalf("modal = %T %+v", m.modal, m.modal)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // close the dialog
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // clear the selection
+	if len(m.selected) != 0 {
+		t.Errorf("esc should clear the selection")
+	}
+}
+
+func TestMovePickerListsOtherSessions(t *testing.T) {
+	m := newTestModel(t) // work is selected
+	m.Update(key("2"))
+	m.Update(key("m"))
+	p, ok := m.modal.(*pickerModal)
+	if !ok {
+		t.Fatalf("modal = %T", m.modal)
+	}
+	if len(p.items) != 2 || p.items[0].text != "api" || p.items[1].text != "notes" {
+		t.Fatalf("targets = %+v", p.items)
+	}
+	p.update(key("no"))
+	if len(p.hits) != 1 || p.hits[0].item.text != "notes" {
+		t.Errorf("filter 'no' hits = %+v", p.hits)
+	}
+}
+
+func TestJumpTabSelectsWindow(t *testing.T) {
+	m := newTestModel(t)
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	p, ok := m.modal.(*pickerModal)
+	if !ok {
+		t.Fatalf("modal = %T", m.modal)
+	}
+	m.Update(key("apicl"))
+	if len(p.hits) == 0 || p.hits[0].item.win != "@1" {
+		t.Fatalf("first hit = %+v", p.hits)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if m.modal != nil || m.selSess != "$0" || m.selWin != "@1" || m.focus != panelWindows {
+		t.Errorf("tab should select api:2 claude: modal=%v sel=%s %s focus=%d", m.modal, m.selSess, m.selWin, m.focus)
 	}
 }
 

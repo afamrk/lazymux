@@ -91,7 +91,8 @@ func (m *Model) setFocused(f bool, winW int) tea.Cmd {
 	if f {
 		return tea.Batch(resize, m.fetchTree(), m.fetchPreview())
 	}
-	m.modal = nil // an open dialog does not survive leaving the sidebar
+	m.modal = nil // an open dialog or filter input does not survive leaving the sidebar
+	m.filtering = false
 	return resize
 }
 

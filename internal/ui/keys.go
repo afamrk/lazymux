@@ -19,15 +19,16 @@ var bindings = []binding{
 	{"g / G", "first / last", "Navigation", 0, "", false},
 	{"h / l, tab", "previous / next panel", "Navigation", 0, "", false},
 	{"1 2 3", "jump to panel", "Navigation", 0, "", false},
-	{"/", "filter list", "Navigation", 0, "", true},
+	{"/", "filter the list (enter keep · esc clear)", "Navigation", 0, "/", false},
+	{"ctrl+p", "jump anywhere (fuzzy)", "Navigation", 0, "ctrl+p", false},
 
 	{"enter", "switch to selection", "Sessions & windows", 0, "enter", false},
 	{"n", "new (session / window / pane)", "Sessions & windows", 0, "n", false},
 	{"r", "rename", "Sessions & windows", 0, "r", false},
-	{"d", "kill (asks first)", "Sessions & windows", 0, "d", false},
+	{"d", "kill selection or cursor item (asks)", "Sessions & windows", 0, "d", false},
 	{"u", "undo last kill", "Sessions & windows", 0, "u", false},
-	{"m", "move / join to marked", "Sessions & windows", 0, "m", false},
-	{"s", "swap with marked", "Sessions & windows", 0, "s", false},
+	{"m", "move windows / join panes to… (picker)", "Sessions & windows", 0, "m", false},
+	{"s", "swap selected item with cursor", "Sessions & windows", 0, "s", false},
 	{"b", "break pane to window", "Sessions & windows", 0, "b", false},
 	{"z", "zoom pane", "Sessions & windows", 0, "z", false},
 	{"L", "cycle layout", "Sessions & windows", 0, "L", false},
@@ -39,9 +40,9 @@ var bindings = []binding{
 	{"B", "jump to next blocked", "Agents", 1, "", true},
 	{"w", "new agent in git worktree", "Agents", 1, "", true},
 
-	{"space", "mark item (target for m / s)", "Selection", 1, " ", false},
-	{"v", "mark range", "Selection", 1, "", true},
-	{"esc", "clear mark / close", "Selection", 1, "", false},
+	{"space", "select / unselect item", "Selection", 1, " ", false},
+	{"v", "select range (from last space)", "Selection", 1, "v", false},
+	{"esc", "clear selection, then filter", "Selection", 1, "", false},
 
 	{"a", "switch page (tmux ⇄ agents)", "Global", 1, "a", false},
 	{"N", "open project (sessionizer)", "Global", 1, "", true},
@@ -59,6 +60,8 @@ func keyMsg(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyTab}
 	case " ":
 		return tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}
+	case "ctrl+p":
+		return tea.KeyMsg{Type: tea.KeyCtrlP}
 	}
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }

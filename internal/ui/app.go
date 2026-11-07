@@ -3,6 +3,7 @@ package ui
 
 import (
 	"fmt"
+	"github.com/charmbracelet/bubbles/textinput"
 	"os"
 	"strings"
 	"time"
@@ -52,11 +53,17 @@ type Model struct {
 
 	compactCur int // line of the current window in the compact view (for scrolling)
 
-	modal    modal    // open dialog, if any
-	mark     *markRef // target for move / swap
+	modal    modal // open dialog, if any
 	toast    toastState
 	toastSeq int
-	undo     []*tmux.Snapshot // killed items, most recent last
+	undo     [][]*tmux.Snapshot // undo steps (one per kill, possibly several items), most recent last
+
+	filter    [numPanels]string // per-panel filter (/)
+	filtering bool              // the filter input of the focused panel has the keys
+	filterIn  textinput.Model
+
+	selected []selRef // multi-selection (space / v), all in one panel
+	anchor   string   // id of the last item toggled with space (start of a v range)
 
 	// AttachTo is set when lazymux runs outside tmux and the user picked a
 	// session; the caller execs `tmux attach` after the program exits.
@@ -172,7 +179,7 @@ func (m *Model) sessions() []*tmux.Session {
 // cur resolves the selected ids to items and indices, falling back to the
 // first / active item when an id no longer exists.
 func (m *Model) cur() (s *tmux.Session, si int, w *tmux.Window, wi int, p *tmux.Pane, pi int) {
-	ss := m.sessions()
+	ss := m.visSessions()
 	if len(ss) == 0 {
 		return
 	}
@@ -182,23 +189,34 @@ func (m *Model) cur() (s *tmux.Session, si int, w *tmux.Window, wi int, p *tmux.
 			s, si = x, i
 		}
 	}
-	w = s.ActiveWindow()
-	for _, x := range s.Windows {
+	ws := m.visWindows(s)
+	if len(ws) == 0 {
+		return
+	}
+	w = ws[0]
+	if a := s.ActiveWindow(); indexOf(ws, a) >= 0 && ws[indexOf(ws, a)] == a {
+		w = a
+	}
+	for _, x := range ws {
 		if x.ID == m.selWin {
 			w = x
 		}
 	}
-	if w == nil {
+	wi = indexOf(ws, w)
+	ps := m.visPanes(w)
+	if len(ps) == 0 {
 		return
 	}
-	wi = indexOf(s.Windows, w)
-	p = w.ActivePane()
-	for _, x := range w.Panes {
+	p = ps[0]
+	if a := w.ActivePane(); indexOf(ps, a) >= 0 && ps[indexOf(ps, a)] == a {
+		p = a
+	}
+	for _, x := range ps {
 		if x.ID == m.selPane {
 			p = x
 		}
 	}
-	pi = indexOf(w.Panes, p)
+	pi = indexOf(ps, p)
 	return
 }
 
@@ -235,19 +253,22 @@ func (m *Model) move(delta int) {
 	}
 	switch m.focus {
 	case panelSessions:
-		ss := m.sessions()
-		ns := ss[clamp(si+delta, 0, len(ss)-1)]
-		m.selSess = ns.ID
+		ss := m.visSessions()
+		m.selSess = ss[clamp(si+delta, 0, len(ss)-1)].ID
 		m.selWin, m.selPane = "", ""
 	case panelWindows:
-		nw := s.Windows[clamp(wi+delta, 0, len(s.Windows)-1)]
-		m.selWin = nw.ID
-		m.selPane = ""
-	case panelPanes:
-		if w == nil {
+		ws := m.visWindows(s)
+		if len(ws) == 0 {
 			return
 		}
-		m.selPane = w.Panes[clamp(pi+delta, 0, len(w.Panes)-1)].ID
+		m.selWin = ws[clamp(wi+delta, 0, len(ws)-1)].ID
+		m.selPane = ""
+	case panelPanes:
+		ps := m.visPanes(w)
+		if len(ps) == 0 {
+			return
+		}
+		m.selPane = ps[clamp(pi+delta, 0, len(ps)-1)].ID
 	}
 	m.normalize()
 }
@@ -275,6 +296,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.tree = msg.tree
 		m.normalize()
+		m.pruneSelection()
 		if t := m.previewTarget(); t != nil && m.previewFor != t.ID {
 			return m, m.fetchPreview()
 		}
@@ -339,6 +361,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.filtering { // the filter input gets everything, typed text included
+		return m, m.handleFilterKey(k)
+	}
 	// Bubble Tea delivers runes that arrive together (fast typing, key
 	// repeat when holding j) as one KeyMsg; handle them one by one.
 	if k.Type == tea.KeyRunes && len(k.Runes) > 1 && !k.Paste {
@@ -349,13 +374,19 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 	}
+	if k.String() == "esc" && m.page == pageTmux { // esc clears selection, then filter
+		if len(m.selected) > 0 {
+			m.selected = nil
+			return m, nil
+		}
+		if m.filter[m.focus] != "" {
+			m.filter[m.focus] = ""
+			return m, m.afterSelectionChange()
+		}
+	}
 	if m.sidebar {
 		switch k.String() {
 		case "q", "esc":
-			if k.String() == "esc" && m.mark != nil {
-				m.mark = nil
-				return m, nil
-			}
 			return m, m.leaveSidebar()
 		case "Q":
 			return m, m.sidebarOff()
@@ -365,9 +396,10 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "a":
 		return m, m.togglePage()
 	case "q", "ctrl+c", "esc":
-		if k.String() != "esc" || m.mark == nil {
-			return m, tea.Quit
-		}
+		return m, tea.Quit
+	case "ctrl+p":
+		m.openJump()
+		return m, nil
 	case "?":
 		m.openHelp()
 		return m, nil
@@ -381,11 +413,14 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		prevTarget = t.ID
 	}
 	switch k.String() {
-	case "esc": // a mark is set (no mark quits above)
-		m.mark = nil
-		return m, nil
 	case " ":
-		return m, m.toggleMark()
+		m.toggleSelect()
+		return m, nil
+	case "v":
+		return m, m.selectRange()
+	case "/":
+		m.startFilter()
+		return m, nil
 	case "n":
 		return m, m.newCmd()
 	case "r":
@@ -566,54 +601,93 @@ func (m *Model) panelHeights(bodyH int, counts [numPanels]int) [numPanels]int {
 
 func (m *Model) viewLeft(w, bodyH int) string {
 	s, si, win, wi, _, pi := m.cur()
-	nWin, nPane := 0, 0
-	if s != nil {
-		nWin = len(s.Windows)
+	ss, ws, ps := m.visSessions(), m.visWindows(s), m.visPanes(win)
+	counts := [numPanels]int{len(ss), len(ws), len(ps)}
+	for i := range counts {
+		if m.showFilter(i) {
+			counts[i]++
+		}
 	}
-	if win != nil {
-		nPane = len(win.Panes)
-	}
-	hs := m.panelHeights(bodyH, [numPanels]int{len(m.sessions()), nWin, nPane})
+	hs := m.panelHeights(bodyH, counts)
 	inner := w - 2
 
 	// [1] Sessions
-	var rows []string
-	ss := m.sessions()
-	m.off[0] = scrollWindow(m.off[0], si, hs[0]-2, len(ss))
-	for i := m.off[0]; i < len(ss) && i < m.off[0]+hs[0]-2; i++ {
-		rows = append(rows, m.sessionRow(ss[i], inner, m.selState(panelSessions, i == si)))
-	}
-	p1 := renderBox(m.numTitle(1, "Sessions", panelSessions)+" ", fmt.Sprintf("%d of %d", si+1, len(ss)), rows, w, hs[0], m.focus == panelSessions)
+	rows := m.panelRows(panelSessions, hs[0], inner, len(ss), si, func(i, sel int) string {
+		return m.sessionRow(ss[i], inner, sel)
+	})
+	p1 := renderBox(m.numTitle(1, "Sessions", panelSessions)+" ", m.footer(panelSessions, si, len(ss)), rows, w, hs[0], m.focus == panelSessions)
 
 	// [2] Windows
-	rows = nil
-	if s != nil {
-		m.off[1] = scrollWindow(m.off[1], wi, hs[1]-2, nWin)
-		for i := m.off[1]; i < nWin && i < m.off[1]+hs[1]-2; i++ {
-			rows = append(rows, m.windowRow(s.Windows[i], inner, m.selState(panelWindows, i == wi)))
-		}
-	}
+	rows = m.panelRows(panelWindows, hs[1], inner, len(ws), wi, func(i, sel int) string {
+		return m.windowRow(ws[i], inner, sel)
+	})
 	title := m.numTitle(2, "Windows", panelWindows)
 	if s != nil {
 		title += stFaint.Render(" (" + s.Name + ") ")
 	}
-	p2 := renderBox(title, fmt.Sprintf("%d of %d", wi+1, nWin), rows, w, hs[1], m.focus == panelWindows)
+	p2 := renderBox(title, m.footer(panelWindows, wi, len(ws)), rows, w, hs[1], m.focus == panelWindows)
 
 	// [3] Panes
-	rows = nil
-	if win != nil {
-		m.off[2] = scrollWindow(m.off[2], pi, hs[2]-2, nPane)
-		for i := m.off[2]; i < nPane && i < m.off[2]+hs[2]-2; i++ {
-			rows = append(rows, m.paneRow(win.Panes[i], inner, m.selState(panelPanes, i == pi)))
-		}
-	}
+	rows = m.panelRows(panelPanes, hs[2], inner, len(ps), pi, func(i, sel int) string {
+		return m.paneRow(ps[i], inner, sel)
+	})
 	title = m.numTitle(3, "Panes", panelPanes)
 	if win != nil {
 		title += stFaint.Render(fmt.Sprintf(" (%d:%s) ", win.Index, win.Name))
 	}
-	p3 := renderBox(title, fmt.Sprintf("%d of %d", pi+1, nPane), rows, w, hs[2], m.focus == panelPanes)
+	p3 := renderBox(title, m.footer(panelPanes, pi, len(ps)), rows, w, hs[2], m.focus == panelPanes)
 
 	return lipgloss.JoinVertical(lipgloss.Left, p1, p2, p3)
+}
+
+// showFilter reports whether a panel shows its filter line.
+func (m *Model) showFilter(panel int) bool {
+	return m.filter[panel] != "" || (m.filtering && m.focus == panel)
+}
+
+// panelRows renders a panel's body: the filter line (if any) and the visible
+// part of its list, scrolled to keep the cursor in view.
+func (m *Model) panelRows(panel, h, inner, n, cur int, row func(i, sel int) string) []string {
+	var rows []string
+	avail := h - 2
+	if m.showFilter(panel) {
+		if m.filtering && m.focus == panel {
+			m.filterIn.Width = max(1, inner-4)
+			rows = append(rows, " "+m.filterIn.View())
+		} else {
+			rows = append(rows, " "+stBlue.Render("/ ")+stText.Render(m.filter[panel]))
+		}
+		avail--
+	}
+	m.off[panel] = scrollWindow(m.off[panel], cur, avail, n)
+	for i := m.off[panel]; i < n && i < m.off[panel]+avail; i++ {
+		rows = append(rows, row(i, m.selState(panel, i == cur)))
+	}
+	if n == 0 && m.filter[panel] != "" {
+		rows = append(rows, " "+stFaint.Render("no match"))
+	}
+	return rows
+}
+
+// footer is the bottom-border text of a panel: "3 of 6 · 2 selected".
+func (m *Model) footer(panel, cur, n int) string {
+	pos := 0
+	if n > 0 {
+		pos = cur + 1
+	}
+	f := fmt.Sprintf("%d of %d", pos, n)
+	if k := m.selectedIn(panel); k > 0 {
+		f += fmt.Sprintf(" · %d selected", k)
+	}
+	return f
+}
+
+// selectedIn counts selected items of a panel.
+func (m *Model) selectedIn(panel int) int {
+	if len(m.selected) == 0 || m.selected[0].panel != panel {
+		return 0
+	}
+	return len(m.selected)
 }
 
 func (m *Model) selState(panel int, selected bool) int {
@@ -646,13 +720,16 @@ func (m *Model) sessionRow(s *tmux.Session, w, sel int) string {
 	if s.Attached {
 		mark = seg{"● ", stGreen}
 	}
-	left := []seg{m.markSeg(panelSessions, s.ID), mark, {s.Name, m.textStyle(panelSessions)}}
+	_, idx := m.matchSession(s)
+	left := append([]seg{m.markSeg(panelSessions, s.ID), mark}, hlSegs(s.Name, idx, m.textStyle(panelSessions), stMatch)...)
 	right := []seg{{fmt.Sprintf("%dw ", len(s.Windows)), stFaint}}
 	return renderRow(left, right, w, sel)
 }
 
 func (m *Model) windowRow(win *tmux.Window, w, sel int) string {
-	left := []seg{m.markSeg(panelWindows, win.ID), {fmt.Sprintf("%d ", win.Index), stBlue}, {win.Name, m.textStyle(panelWindows)}}
+	_, idx := m.matchWindow(win)
+	left := append([]seg{m.markSeg(panelWindows, win.ID), {fmt.Sprintf("%d ", win.Index), stBlue}},
+		hlSegs(win.Name, idx, m.textStyle(panelWindows), stMatch)...)
 	var right []seg
 	if n := len(win.Panes); n > 1 {
 		right = append(right, seg{fmt.Sprintf("%dp ", n), stFaint})
@@ -670,7 +747,9 @@ func (m *Model) windowRow(win *tmux.Window, w, sel int) string {
 }
 
 func (m *Model) paneRow(p *tmux.Pane, w, sel int) string {
-	left := []seg{m.markSeg(panelPanes, p.ID), {p.ID + " ", stPeach}, {p.Command, m.textStyle(panelPanes)}}
+	_, idx := m.matchPane(p)
+	left := append([]seg{m.markSeg(panelPanes, p.ID), {p.ID + " ", stPeach}},
+		hlSegs(p.Command, idx, m.textStyle(panelPanes), stMatch)...)
 	right := []seg{{fmt.Sprintf("%dx%d", p.Width, p.Height), stFaint}}
 	if p.Active {
 		right = append(right, seg{" *", stMauve})
@@ -681,9 +760,9 @@ func (m *Model) paneRow(p *tmux.Pane, w, sel int) string {
 	return renderRow(left, right, w, sel)
 }
 
-// markSeg is the one-cell gutter at the start of a row: ◆ when marked.
+// markSeg is the one-cell gutter at the start of a row: ◆ when selected.
 func (m *Model) markSeg(panel int, id string) seg {
-	if m.isMarked(panel, id) {
+	if m.isSelected(panel, id) {
 		return seg{"◆", stMauve}
 	}
 	return seg{" ", stText}
@@ -712,10 +791,23 @@ func (m *Model) viewBar() string {
 	if m.err != nil {
 		return ansi.Truncate(stRed.Render(" "+m.err.Error()), m.w, "…")
 	}
-	type kd struct{ k, d string }
 	var keys []kd
-	if m.mark != nil {
-		keys = append(keys, kd{"◆", m.mark.label})
+	if n := m.selectedIn(m.focus); n > 0 && m.page == pageTmux {
+		keys = append(keys, kd{"◆", fmt.Sprintf("%d selected", n)})
+		switch m.focus {
+		case panelWindows:
+			keys = append(keys, kd{"m", "move"})
+			if n == 1 {
+				keys = append(keys, kd{"s", "swap with cursor"})
+			}
+		case panelPanes:
+			keys = append(keys, kd{"m", "join"})
+			if n == 1 {
+				keys = append(keys, kd{"s", "swap with cursor"})
+			}
+		}
+		keys = append(keys, kd{"d", "kill all"}, kd{"space", "select"}, kd{"v", "range"}, kd{"esc", "clear"}, kd{"?", "help"})
+		return m.renderBar(keys)
 	}
 	keys = append(keys, kd{"enter", "switch"})
 	if m.sidebar {
@@ -727,11 +819,11 @@ func (m *Model) viewBar() string {
 	}
 	switch m.focus {
 	case panelSessions:
-		keys = append(keys, kd{"space", "mark"})
+		keys = append(keys, kd{"/", "filter"}, kd{"space", "select"}, kd{"ctrl+p", "jump"})
 	case panelWindows:
-		keys = append(keys, kd{"m", "move"}, kd{"s", "swap"}, kd{"L", "layout"}, kd{"space", "mark"})
+		keys = append(keys, kd{"m", "move"}, kd{"/", "filter"}, kd{"space", "select"}, kd{"L", "layout"})
 	case panelPanes:
-		keys = append(keys, kd{"z", "zoom"}, kd{"b", "break"}, kd{"m", "join"}, kd{"s", "swap"}, kd{"space", "mark"})
+		keys = append(keys, kd{"z", "zoom"}, kd{"b", "break"}, kd{"m", "join"}, kd{"/", "filter"}, kd{"space", "select"})
 	}
 	last := kd{"q", "quit"}
 	if m.sidebar {
@@ -741,7 +833,15 @@ func (m *Model) viewBar() string {
 	if m.page == pageAgents {
 		keys = []kd{{"[ ]", "tabs"}, {"tab", "panel"}, {"a", "tmux"}, {"?", "help"}, last}
 	}
+	return m.renderBar(keys)
+}
 
+// kd is one key hint of the bottom bar.
+type kd struct{ k, d string }
+
+// renderBar lays out key hints on the left (dropping what does not fit) and
+// the page indicator on the right.
+func (m *Model) renderBar(keys []kd) string {
 	right := m.pageIndicator()
 	avail := m.w - ansi.StringWidth(right) - 1
 	left := ""

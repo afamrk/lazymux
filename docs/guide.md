@@ -6,7 +6,8 @@
 - [Switching](#switching)
 - [Creating and renaming](#creating-and-renaming)
 - [Killing and undo](#killing-and-undo)
-- [Marks: move and swap](#marks-move-and-swap)
+- [Filter and jump](#filter-and-jump)
+- [Selecting, moving and swapping](#selecting-moving-and-swapping)
 - [Pane and window tools](#pane-and-window-tools)
 - [Help screen](#help-screen)
 - [Command-line flags](#command-line-flags)
@@ -70,7 +71,7 @@ Each panel shows `n of m` in its bottom border: the position of the selection.
 
 **Right side**: the live preview of the selected pane. It is the pane's visible screen with its colors, refreshed every second. The border shows `session:window.%pane · command`. The sidebar pane itself is never shown or listed. If you run plain `lazymux` in a normal pane and the session or window you select resolves to that pane, the preview shows the pane you came from instead (the window's last pane, or the session's last window); the border names the pane actually shown. Only when you select lazymux's own pane in the Panes panel does it say "(this is lazymux itself)", instead of drawing a picture inside a picture.
 
-**Bottom bar**: key hints for the focused panel, plus the marked item (`◆ …`) when there is one. Hints that don't fit are dropped; `?` always lists everything.
+**Bottom bar**: key hints for the focused panel; while items are selected it shows `◆ N selected` and what you can do with them. Hints that don't fit are dropped; `?` always lists everything.
 
 On terminals narrower than 64 columns, the preview is hidden and the panels use the full width.
 
@@ -133,6 +134,7 @@ The current name is pre-filled; edit it and press `enter`.
 ╰─ y yes · n / esc no · u undo later ────────────╯
 ```
 
+- With several items selected, one dialog covers them all (see [Selecting, moving and swapping](#selecting-moving-and-swapping)).
 - The dialog lists how many windows and panes go away, and warns in red about **programs still running** in them (anything that is not a plain shell).
 - The default is **No**: pressing `enter` right away does nothing. Press `y` to kill, or move to "Yes" with `←` / `→` / `tab` and press `enter`.
 - lazymux refuses to kill its own pane.
@@ -140,7 +142,7 @@ The current name is pre-filled; edit it and press `enter`.
 
 After a kill, a green toast confirms it: `✓ killed window 1:server · u to undo`.
 
-**`u` (undo)** recreates the last killed item. Before every kill, lazymux records:
+**`u` (undo)** recreates the last killed item (or the whole batch of a bulk kill). Before every kill, lazymux records:
 
 - the session / window name and window number
 - the window layout (splits and sizes)
@@ -157,25 +159,37 @@ What undo **cannot** bring back, because tmux cannot revive a process:
 
 Undo keeps the last 20 kills, most recent first, but only while lazymux is running. The sidebar keeps running, so undo covers everything since the sidebar started; a plain `lazymux` run exits after every switch, so there it only covers that run. (Whether to keep the history on disk is an [open decision](roadmap.md#open-decisions).)
 
-## Marks: move and swap
+## Filter and jump
 
-Some actions need two things: the item to change (the selection) and a **target**. You set the target by marking it.
+**`/` (filter)** narrows the focused panel. A filter line `/ cla` appears at the top of the panel and the list shows only matching items, with the matched letters highlighted in peach. Matching is fuzzy: the letters must appear in order, not next to each other (`cla` matches `claude-api` and `clang-tools`).
 
-1. Select the target and press **`space`**. It gets a mauve `◆` and the bottom bar shows `◆ session api` (or the window / pane).
-2. Select the item you want to change and press **`m`** or **`s`**.
-3. After a successful move or swap the mark is cleared. `space` on the marked item again, or `esc`, clears it by hand.
+- Sessions match on their name; windows on name, number and command; panes on command, id, title and directory.
+- While typing, `↑` / `↓` move through the matches. `enter` keeps the filter and gives the keys back (`j`, `space`, `d`… work on the filtered list); `esc` clears it.
+- Each panel keeps its own filter until you clear it with `esc`.
 
-**`m` (move / join)**:
+**`ctrl+p` (jump anywhere)** opens one fuzzy list of every session (`SESS`), window (`WIN`) and pane (`PANE`, only for windows with several panes), with the command and directory on the right. Type a few letters, e.g. `apicl` for `api:3 claude`.
 
-- **Window → marked session**: moves the selected window to the end of the marked session. Example: mark session `api`, select window `editor` in `work`, press `m`; `editor` now lives in `api`.
-- **Pane → marked window or pane**: joins the selected pane into the marked window (or next to the marked pane) as a side-by-side split. Example: mark your editor window, select the `logs` pane in another window, press `m`; the logs appear beside the editor.
+- `enter` goes there (switches, like `enter` in the panels).
+- `tab` only selects it in the panels, so you can act on it (kill, move…) without switching.
 
-**`s` (swap)**:
+## Selecting, moving and swapping
 
-- **Window ↔ marked window**: the two windows trade places (index and position). They can be in different sessions.
-- **Pane ↔ marked pane**: the two panes trade places, e.g. editor-left / shell-right becomes shell-left / editor-right.
+**`space`** selects the item under the cursor: it gets a mauve `◆` and the panel's border shows `3 of 6 · 2 selected`. Press `space` again to unselect. All selected items are in one panel; selecting in another panel starts over.
 
-If the mark is missing or of the wrong kind, a toast says what to mark (for example "move window: mark a target first with space on a session").
+**`v`** selects a range: every item from the last one you selected with `space` to the cursor. With a filter active, only the visible items are included, so `/ cla` → `g` `space` `G` `v` selects every match.
+
+While something is selected, the bottom bar shows what you can do with it: `◆ 2 selected · m move · d kill all · space select · v range · esc clear`. **`esc`** clears the selection.
+
+Actions use the selection when there is one in the focused panel, otherwise the item under the cursor:
+
+**`d` (kill)** asks once for all of them, listing up to five (`◆ window 1:claude-api of api (1 panes)` …). **`u`** brings the whole batch back in one step.
+
+**`m` (move)** opens a picker for the destination:
+
+- **Windows → a session**: `Move 2 windows to` lists the other sessions. Type to filter, `enter` moves them (to the end of that session).
+- **Panes → a window**: `Join pane into` lists every other window. The panes are joined into it as side-by-side splits.
+
+**`s` (swap)** exchanges two items: select one with `space`, move the cursor to the other, press `s`. Windows trade places (they may be in different sessions); panes trade places in their layouts.
 
 ## Pane and window tools
 

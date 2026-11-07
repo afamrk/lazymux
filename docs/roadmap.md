@@ -11,11 +11,10 @@ Three panels with cascading selection, fixed content-aware panel sizes, live col
 ### ✅ P1: manage
 New session / window / pane (with an fzf directory picker), rename, kill with a confirm dialog, undo, mark + move / join, swap, break, zoom, layout cycling, toasts, context-aware key bar, filterable and runnable help screen.
 
-### P2: filter and multi-select
-- `/` fuzzy filter in each panel; `esc` clears it
-- `space` on several items and `v` for a range; bulk kill and move
-- `ctrl+p`: one fuzzy search over every session, window and pane, to jump anywhere
-- design the filter / multi-select screen in Stitch first
+### ✅ P2: filter and multi-select
+- `/` fuzzy filter in each panel with highlighted matches; `enter` keeps it, `esc` clears it
+- `space` selects several items, `v` a range; bulk kill (one undo step), move windows / join panes through a fuzzy target picker, `s` swaps the one selected item with the cursor (replaces the P1 "mark a target" flow)
+- `ctrl+p`: one fuzzy search over every session, window and pane; `enter` goes there, `tab` only selects
 
 ### P3: Agents page
 Fill the Agents page (already reachable with `a`, with its state tabs), as designed:
@@ -47,7 +46,7 @@ Fill the Agents page (already reachable with `a`, with its state tabs), as desig
 
 Ideas collected from tmux-fzf, agenmux, tmux-agent-sidebar and herdr, roughly by value:
 
-1. **Send keys / broadcast**: type a line and send it to the selected or marked panes
+1. **Send keys / broadcast**: type a line and send it to the selected panes
 2. **Session snapshots and templates**: save / restore a whole session (windows, layouts, dirs, commands) to YAML; project templates such as "nvim + shell + agent"
 3. **Scrollback search** in the preview, copy to a tmux buffer
 4. **Process actions**: send SIGINT / TERM / KILL / STOP / CONT to a pane's process, show its process tree
