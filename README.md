@@ -61,11 +61,19 @@ See [docs/roadmap.md](docs/roadmap.md) for details and open decisions.
 ## Install
 
 ```sh
-git clone <this repo> lazymux && cd lazymux
+go install github.com/afamrk/lazymux/cmd/lazymux@latest
+```
+
+This puts `lazymux` in `$(go env GOPATH)/bin` (usually `~/go/bin`); make sure that is on your `PATH`.
+
+Or build from source:
+
+```sh
+git clone https://github.com/afamrk/lazymux.git && cd lazymux
 go build -o ~/.local/bin/lazymux ./cmd/lazymux
 ```
 
-Make sure `~/.local/bin` is on your `PATH`. After rebuilding, press `prefix` + `b` twice so the running sidebars restart with the new binary.
+After upgrading, press `prefix` + `b` twice so the running sidebars restart with the new binary.
 
 ## Quick start
 
@@ -156,3 +164,7 @@ Full reference: [docs/keybindings.md](docs/keybindings.md).
 ## Credits
 
 Inspired by [lazygit](https://github.com/jesseduffield/lazygit), [tmux-fzf](https://github.com/sainnhe/tmux-fzf), [agenmux](https://snirt.github.io/agenmux/), [tmux-agent-sidebar](https://github.com/hiroppy/tmux-agent-sidebar) and [herdr](https://github.com/herdrdev/herdr). Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lip Gloss](https://github.com/charmbracelet/lipgloss); colors are [Catppuccin Mocha](https://catppuccin.com).
+
+## License
+
+[MIT](LICENSE)
