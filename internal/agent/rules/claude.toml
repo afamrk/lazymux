@@ -1,7 +1,7 @@
 # lazymux detection rules for Claude Code (format: see internal/agent/rules.go).
 # Copy to ~/.config/lazymux/agent-detection/claude.toml to change them.
 id = "claude"
-version = "2026.11.07.1"
+version = "2026.11.08.1"
 min_engine_version = 1
 aliases = ["claude-code"]
 
@@ -61,9 +61,11 @@ any = [
   { contains = ["esc to cancel"] },
   { contains = ["ctrl+c to interrupt"] },
 ]
-# menus and forms (model picker, questions) say "esc to cancel" too, but
-# they wait for you
+# menus, forms and dialogs (model picker, questions, /usage, /status) say
+# "esc to cancel" too, but they wait for you; a dialog's footer is the hint
+# alone on its line
 not = [
+  { line_regex = ['(?i)^\s*esc to (cancel|close|exit)\s*$'] },
   { contains = ["enter to select"] },
   { contains = ["enter to confirm"] },
   { contains = ["enter to set as default"] },

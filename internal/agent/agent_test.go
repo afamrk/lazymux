@@ -77,6 +77,7 @@ func TestClassify(t *testing.T) {
 		{"blocked beats a spinning title", Claude, claudeBlocked, "⠂ Fix JWT expiry", Blocked, "Bash command: go test ./internal/auth/...", true},
 		{"claude question form", Claude, claudeQuestion, "✳ Input option", Blocked, "Which option do you pick: One, Two, or Three?", true},
 		{"a menu's esc to cancel is not working", Claude, "Select model\n❯ Opus\n  Sonnet\nEnter to select · Esc to cancel\n", "", Idle, "", false},
+		{"claude /usage dialog is idle", Claude, "   Settings  Status   Config   Usage   Stats\n   Current week (all models)\n   ███▌    39% used\n   Resets Nov 9, 5:30pm\n   d to day · w to week\n   Esc to cancel\n", "✳ Claude Code", Idle, "", true},
 		{"codex working", Codex, "• Explaining\n\n• Working (12s • esc to interrupt)\n▌ \n", "", Working, "", true},
 		{"codex blocked", Codex, "Would you like to run the following command?\n\n  $ rm -rf build\n\n› 1. Yes, proceed (y)\n  2. Yes, and don't ask again (a)\n  3. No (esc)\n", "", Blocked, "$ rm -rf build", true},
 		{"gemini working", Gemini, "⠏ Thinking about it (esc to cancel, 4s)\n> \n", "", Working, "", true},
