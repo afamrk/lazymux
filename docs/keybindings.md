@@ -4,12 +4,31 @@ Inside lazymux, `?` shows this list, lets you filter it with `/`, and runs the s
 
 Legend: ✅ available · 🔜 planned (phase in brackets)
 
+## Sidebar (focused)
+
+The focused sidebar is one list (agents, then sessions › windows › panes); keys act on the cursor row. No pages: `a` does nothing there.
+
+| key | action | |
+| --- | --- | --- |
+| `j` / `k`, `↓` / `↑`, `ctrl+j` / `ctrl+k`, `g` / `G` | move through the whole list | ✅ |
+| `tab` | jump between the agents and the sessions | ✅ |
+| `l` / `h` | unfold / fold a session or window; on an open one, step into its first child / out to its parent | ✅ |
+| `B` | next agent that needs you | ✅ |
+| `/` | filter everything; `enter` keeps it, `esc` clears it | ✅ |
+| `enter` | agent: jump to it · session / window / pane: switch | ✅ |
+| `1` `2` `3`, `i`, `x` | on an agent: answer, reply, stop | ✅ |
+| `N` | agent: new agent · session: new session / window · window: new window · pane: split | ✅ |
+| `r` `d` `u` `m` `s` `b` `z` `L`, `space` `v` | on sessions, windows, panes: as in the panels below | ✅ |
+| `n`, `f`, `?`, `esc` / `q`, `Q` | project, find, help, back to your pane, sidebar off | ✅ |
+
+The rest of this page is plain `lazymux` full screen (panels and the Agents page).
+
 ## Navigation
 
 | key | action | |
 | --- | --- | --- |
-| `j` / `↓` | move down | ✅ |
-| `k` / `↑` | move up | ✅ |
+| `j` / `↓` / `ctrl+j` | move down (`ctrl+j` / `ctrl+k` are ↓ / ↑ everywhere: panels, lists, dialogs, pickers) | ✅ |
+| `k` / `↑` / `ctrl+k` | move up | ✅ |
 | `g` / `home` | first item | ✅ |
 | `G` / `end` | last item | ✅ |
 | `tab`, `l`, `→` | next panel | ✅ |
@@ -25,7 +44,8 @@ What a key does depends on the focused panel.
 | key | Sessions | Windows | Panes | |
 | --- | --- | --- | --- | --- |
 | `enter` | switch to session | switch to window | switch to pane | ✅ |
-| `n` | new session (dialog) | new window (dialog) | split side by side | ✅ |
+| `n` | open a project (picker) | open a project (picker) | open a project (picker) | ✅ |
+| `N` | new session (dialog) | new window (dialog) | split side by side | ✅ |
 | `r` | rename session | rename window | set pane title | ✅ |
 | `d` | kill selected sessions / cursor (confirm) | kill selected windows / cursor (confirm) | kill selected panes / cursor (confirm) | ✅ |
 | `u` | undo last kill (a bulk kill is one step) | ← | ← | ✅ |
@@ -43,9 +63,9 @@ What a key does depends on the focused panel.
 | `v` | select every item from the last `space` to the cursor | ✅ |
 | `esc` | clear the selection, then the filter (then quit / back to your pane) | ✅ |
 
-## Agents
+## Agents page (full screen)
 
-These work on the Agents page (`a` switches pages). There, `tab` / `h` / `l` switch between the agent list and Activity; `1` / `2` / `3` answer instead of switching panels. tmux actions (`n`, `d`, `m`…) do nothing on this page.
+These work on the full-screen Agents page (`a` switches pages; in the sidebar the same answer / reply / stop keys work on agent rows). There, `tab` / `h` / `l` switch between the agent list and Activity; `1` / `2` / `3` answer instead of switching panels. tmux actions (`n`, `d`, `m`…) do nothing on this page.
 
 | key | action | |
 | --- | --- | --- |
@@ -69,8 +89,9 @@ These work on the Agents page (`a` switches pages). There, `tab` / `h` / `l` swi
 | `q`, `ctrl+c` | quit (in the sidebar `q` goes back to your pane instead) | ✅ |
 | `esc` | sidebar: back to your pane (clears the selection, then the filter first) | ✅ |
 | `Q` | sidebar: turn sidebars off everywhere | ✅ |
-| `prefix` + `b` | tmux binding: turn the sidebar on / off (`lazymux sidebar toggle`) | ✅ |
-| `N` | open a project: zoxide directories and git repos; switches to its session or creates it | ✅ |
+| `prefix` + `b` | tmux binding (`lazymux sidebar cycle`): open the sidebar and focus it, focus it, or close it when you are in it; works inside the preview popup too | ✅ |
+| `n` / `N` (Agents page) | `n` on the tmux page, `N` on the Agents page (where `n` starts an agent): open a project from zoxide directories and git repos; switches to its session or creates it | ✅ |
+| `?` | help; in the sidebar it opens inside the preview popup, where there is room | ✅ |
 
 ## Inside dialogs
 

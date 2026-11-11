@@ -102,7 +102,7 @@ func (d *inputModal) update(k tea.KeyMsg) (tea.Cmd, bool) {
 			if q == d.fields[d.focus].def { // untouched default: search everything
 				q = ""
 			}
-			return pickDirCmd(q), false
+			return func() tea.Msg { return pickDirReq{q} }, false
 		}
 		return nil, false
 	case tea.KeyShiftTab, tea.KeyUp:

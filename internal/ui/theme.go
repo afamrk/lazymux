@@ -17,6 +17,14 @@ const (
 	cRed      = lipgloss.Color("#f38ba8")
 	cMauve    = lipgloss.Color("#cba6f7")
 	cPeach    = lipgloss.Color("#fab387")
+	cTeal     = lipgloss.Color("#94e2d5")
+	cSky      = lipgloss.Color("#89dceb")
+
+	// tinted backgrounds for chips and the blocked agent's card
+	cRedBg    = lipgloss.Color("#3b2a35")
+	cYellowBg = lipgloss.Color("#3a3631")
+	cGreenBg  = lipgloss.Color("#2c3a32")
+	cCursor   = lipgloss.Color("#3e4566") // the sidebar's cursor row
 )
 
 var (
@@ -29,6 +37,7 @@ var (
 	stYellow  = lipgloss.NewStyle().Foreground(cYellow)
 	stMauve   = lipgloss.NewStyle().Foreground(cMauve)
 	stPeach   = lipgloss.NewStyle().Foreground(cPeach)
+	stTeal    = lipgloss.NewStyle().Foreground(cTeal)
 	stKey     = lipgloss.NewStyle().Foreground(cBlue).Bold(true)
 	stTitleOn = lipgloss.NewStyle().Foreground(cBlue).Bold(true)
 )

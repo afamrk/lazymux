@@ -65,10 +65,26 @@ type Model struct {
 
 	selfPane string // lazymux's own pane ($TMUX_PANE), never previewed
 
-	sidebar bool // running as `lazymux sidebar`
-	focused bool // sidebar pane has focus (shows the full UI)
+	sidebar bool // running as `lazymux sidebar` (the list in list.go, not the panels)
+	focused bool // sidebar pane has focus (the list has a cursor)
 
-	compactCur int // line of the current window in the compact view (for scrolling)
+	popupOpen   bool          // the preview popup is open
+	popupClient string        // client tty the popup is on
+	published   string        // preview state last sent to the popup
+	link        *linkListener // socket the popup connects to
+	conn        *wireConn     // the connected popup, if any
+	popupW      int           // popup size, for dialogs drawn there
+	popupH      int
+	overlaySent string   // dialog last sent to the popup
+	replay      []string // prefix keys from the popup, sent to tmux once it closes
+	reopen      bool     // reopen the popup if a replayed binding left you in the sidebar
+
+	// the sidebar list (list.go)
+	listSel    string          // key of the cursor row
+	listIdx    int             // its index, to fall back to when it disappears
+	listOff    int             // scroll offset in lines
+	listFilter string          // / filter
+	fold       map[string]bool // sessions / windows you unfolded or folded
 
 	modal    modal // open dialog, if any
 	toast    toastState
@@ -129,6 +145,9 @@ func (m *Model) fetchTree() tea.Cmd {
 }
 
 func (m *Model) fetchPreview() tea.Cmd {
+	if m.sidebar { // the popup captures; tell it what to show
+		return m.publishPreview()
+	}
 	p := m.previewTarget()
 	if p == nil || p.ID == m.selfPane {
 		return nil
@@ -308,6 +327,12 @@ func clamp(v, lo, hi int) int {
 // --- update ----------------------------------------------------------------
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	mm, cmd := m.update(msg)
+	m.syncOverlay()
+	return mm, cmd
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
@@ -339,12 +364,34 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case agentsMsg:
 		return m, m.setAgents(msg.agents)
 
-	case tea.FocusMsg:
-		return m, m.setFocused(true, 0)
-	case tea.BlurMsg:
-		return m, m.setFocused(false, 0)
+	case tea.FocusMsg, tea.BlurMsg:
+		return m, m.checkFocus()
 	case focusMsg:
 		return m, m.reconcile(msg)
+	case popupMsg:
+		m.popupClient = msg.client
+		if !m.popupOpen { // left again before it opened
+			return m, nil
+		}
+		return m, tea.Batch(m.runPopup(msg.client), m.publishPreview())
+	case popupDoneMsg:
+		return m, m.popupDone(msg.err, msg.d)
+	case replayedMsg:
+		m.reopen = true
+		return m, m.checkFocus()
+	case linkUp:
+		return m, tea.Batch(m.link.wait(), m.linked(msg.conn))
+	case wireIn:
+		return m.fromPopup(msg)
+	case pickDirReq:
+		if m.conn != nil && m.popupOpen { // there is room for fzf in the popup
+			m.conn.post(wire{Kind: "fzf", Query: msg.query})
+			return m, nil
+		}
+		return m, pickDirCmd(msg.query)
+	case popupClosedMsg:
+		m.popupOpen = false
+		return m, m.checkFocus()
 
 	case switchMsg:
 		if msg.err != nil {
@@ -352,7 +399,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.sidebar { // the sidebar stays; focus moved to the target pane
-			return m, m.fetchTree()
+			return m, tea.Batch(m.fetchTree(), m.closePopup(), m.unfocusSelf())
 		}
 		return m, tea.Quit
 
@@ -382,6 +429,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		msg = arrowKeys(msg)
 		if m.modal != nil {
 			cmd, done := m.modal.update(msg)
 			if done {
@@ -396,6 +444,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.listMode() {
+		return m.handleListKey(k)
+	}
 	if m.filtering { // the filter input gets everything, typed text included
 		return m, m.handleFilterKey(k)
 	}
@@ -424,14 +475,6 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.afterSelectionChange()
 		}
 	}
-	if m.sidebar {
-		switch k.String() {
-		case "q", "esc":
-			return m, m.leaveSidebar()
-		case "Q":
-			return m, m.sidebarOff()
-		}
-	}
 	switch k.String() {
 	case "a":
 		return m, m.togglePage()
@@ -440,13 +483,14 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "f", "ctrl+p":
 		m.openJump()
 		return m, nil
-	case "N":
-		return m, m.loadProjects()
 	case "?":
 		m.openHelp()
 		return m, nil
 	}
 	if m.page == pageAgents {
+		if k.String() == "N" {
+			return m, m.loadProjects()
+		}
 		_, cmd := m.handleAgentKey(k.String())
 		return m, cmd
 	}
@@ -464,6 +508,8 @@ func (m *Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.startFilter()
 		return m, nil
 	case "n":
+		return m, m.loadProjects()
+	case "N":
 		return m, m.newCmd()
 	case "r":
 		return m, m.renameCmd()
@@ -542,17 +588,21 @@ func (m *Model) View() string {
 		return stSub.Render("loading…")
 	}
 
-	if m.compactView() {
-		return m.viewCompact()
+	if m.sidebar {
+		view := m.viewList()
+		if m.modal != nil && !m.modalInPopup() {
+			view = center(dim(view), m.modal.view(m.w, m.h), m.w, m.h)
+		}
+		if m.toast.text != "" {
+			t := m.viewToast()
+			view = overlay(view, t, max(0, m.w-lipgloss.Width(t)), max(0, m.h-3-lipgloss.Height(t)))
+		}
+		return view
 	}
 	bodyH := m.h - 1
-	leftPct := 30
-	if m.sidebar { // the pane is already narrow: give the panels more of it
-		leftPct = 45
-	}
 	// the panels need ~60 columns at most; on wide screens the rest goes to
 	// the preview (as in the mockups)
-	leftW := clamp(min(m.w*leftPct/100, maxLeftW), 32, m.w-30)
+	leftW := clamp(min(m.w*30/100, maxLeftW), 32, m.w-30)
 	if m.w < 64 { // too narrow for a preview
 		leftW = m.w
 	}
@@ -576,7 +626,7 @@ func (m *Model) View() string {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, preview(m.w-leftW, bodyH))
 	}
 	view := body + "\n" + m.viewBar()
-	if m.modal != nil {
+	if m.modal != nil && !m.modalInPopup() {
 		view = center(dim(view), m.modal.view(m.w, m.h), m.w, m.h)
 	}
 	if m.toast.text != "" {
@@ -857,11 +907,7 @@ func (m *Model) viewBar() string {
 		keys = append(keys, kd{"d", "kill all"}, kd{"space", "select"}, kd{"v", "range"}, kd{"esc", "clear"}, kd{"?", "help"})
 		return m.renderBar(keys)
 	}
-	keys = append(keys, kd{"enter", "switch"})
-	if m.sidebar {
-		keys = append(keys, kd{"esc", "back"})
-	}
-	keys = append(keys, kd{"n", "new"}, kd{"r", "rename"}, kd{"d", "kill"})
+	keys = append(keys, kd{"enter", "switch"}, kd{"n", "project"}, kd{"N", "new"}, kd{"r", "rename"}, kd{"d", "kill"})
 	if len(m.undo) > 0 {
 		keys = append(keys, kd{"u", "undo"})
 	}
@@ -874,9 +920,6 @@ func (m *Model) viewBar() string {
 		keys = append(keys, kd{"z", "zoom"}, kd{"b", "break"}, kd{"m", "join"}, kd{"/", "filter"}, kd{"space", "select"})
 	}
 	last := kd{"q", "quit"}
-	if m.sidebar {
-		last = kd{"Q", "close sidebar"}
-	}
 	keys = append(keys, kd{"a", "agents"}, kd{"?", "help"}, last)
 	if m.page == pageAgents {
 		keys = m.agentBar(last)

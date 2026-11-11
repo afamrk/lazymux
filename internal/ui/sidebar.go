@@ -2,24 +2,21 @@ package ui
 
 import (
 	"fmt"
-	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/afamrk/lazymux/internal/agent"
 	"github.com/afamrk/lazymux/internal/tmux"
 )
 
 // Sidebar mode: lazymux runs in a narrow pane on the left of the current
-// window. Unfocused it shows a compact tree; when you move into the pane it
-// widens to sidebarFocusPct of the window and shows the full UI, and it
-// shrinks back when you leave.
-const sidebarFocusPct = 60
-
-// minFullWidth is the narrowest pane that gets the full UI.
-const minFullWidth = 50
+// window: one list of agents and sessions (list.go), an overview while
+// unfocused and with a cursor while focused. The pane never resizes, so the
+// other panes keep their layout; the preview of the cursor row and the
+// dialogs open in a popup on the right of the sidebar, which receives the
+// client's keys and forwards them here over a socket (link.go).
 
 // NewSidebar creates the model for `lazymux sidebar`.
 func NewSidebar(c *tmux.Client) *Model {
@@ -28,14 +25,32 @@ func NewSidebar(c *tmux.Client) *Model {
 	return m
 }
 
-// focusMsg reports whether the sidebar pane has focus (from a tick check,
-// for terminals or tmux setups without focus events).
+// focusMsg reports whether the sidebar pane has focus, as tmux sees it.
 type focusMsg struct {
 	focused     bool
 	paneW, winW int
+	session     string
 }
 
-// checkFocus asks tmux whether the sidebar pane is the active one.
+// popupMsg reports the client the preview popup is about to open on.
+type popupMsg struct{ client string }
+
+// popupDoneMsg reports that the popup closed (display-popup returned) and
+// how long it was open.
+type popupDoneMsg struct {
+	err error
+	d   time.Duration
+}
+
+// replayedMsg reports that tmux got the prefix keys from the popup.
+type replayedMsg struct{}
+
+// popupClosedMsg reports that the sidebar closed the popup and focus left.
+type popupClosedMsg struct{}
+
+// checkFocus asks tmux whether the sidebar pane is the active one. Focus
+// events only trigger this check: opening and closing the popup can send
+// focus events of their own, tmux's pane_active is the truth.
 func (m *Model) checkFocus() tea.Cmd {
 	if !m.sidebar || m.selfPane == "" {
 		return nil
@@ -49,245 +64,281 @@ func (m *Model) checkFocus() tea.Cmd {
 		if !st.Docked && st.Session != "" { // a layout change moved it: put it back
 			c.SidebarFollow(st.Session)
 		}
-		return focusMsg{focused: st.Focused, paneW: st.PaneW, winW: st.WinW}
+		return focusMsg{focused: st.Focused, paneW: st.PaneW, winW: st.WinW, session: st.Session}
 	}
 }
 
-// sidebarWidth is the pane width for the focus state in a window winW wide.
-func sidebarWidth(focused bool, winW int) int {
-	if focused {
-		return max(tmux.SidebarWidth, winW*sidebarFocusPct/100)
-	}
-	return tmux.SidebarWidth
-}
-
-// reconcile fixes the pane width when it does not match the focus state,
-// e.g. after the sidebar was moved into another window while wide.
+// reconcile follows the focus state and keeps the pane at its fixed width
+// (an older lazymux widened it on focus).
 func (m *Model) reconcile(msg focusMsg) tea.Cmd {
-	if cmd := m.setFocused(msg.focused, msg.winW); cmd != nil {
-		return cmd
+	cmd := m.setFocused(msg.focused, msg.session)
+	if m.reopen { // a prefix binding ran and left you in the sidebar: preview again
+		m.reopen = false
+		if msg.focused && m.focused {
+			cmd = tea.Batch(cmd, m.openPopup(msg.session))
+		}
 	}
-	if want := sidebarWidth(msg.focused, msg.winW); msg.paneW != want && msg.winW > want {
+	if msg.paneW != tmux.SidebarWidth && msg.winW > tmux.SidebarWidth {
 		c, pane := m.c, m.selfPane
-		return func() tea.Msg { c.ResizeWidth(pane, want); return nil }
+		cmd = tea.Batch(cmd, func() tea.Msg { c.ResizeWidth(pane, tmux.SidebarWidth); return nil })
 	}
-	return nil
+	return cmd
 }
 
-// setFocused widens or narrows the sidebar pane when focus changes.
-func (m *Model) setFocused(f bool, winW int) tea.Cmd {
+// setFocused switches between the overview and the list with a cursor (put
+// on the agent that needs you, else your window), and opens the preview
+// popup when the sidebar gains focus.
+func (m *Model) setFocused(f bool, session string) tea.Cmd {
 	if !m.sidebar || f == m.focused {
 		return nil
 	}
 	m.focused = f
-	c, pane := m.c, m.selfPane
-	resize := func() tea.Msg {
-		w := winW
-		if w == 0 {
-			st, _ := c.SidebarState(pane)
-			w = st.WinW
-		}
-		c.ResizeWidth(pane, sidebarWidth(f, w))
+	if !f {
+		m.modal = nil // an open dialog or filter input does not survive leaving the sidebar
+		m.filtering, m.listFilter = false, ""
+		m.popupOpen, m.published = false, ""
 		return nil
 	}
-	if f {
-		return tea.Batch(resize, m.fetchTree(), m.fetchPreview())
-	}
-	m.modal = nil // an open dialog or filter input does not survive leaving the sidebar
-	m.filtering = false
-	return resize
+	m.listDefault() // the agent that needs you, else your window
+	return tea.Batch(m.fetchTree(), m.openPopup(session), m.listSync())
 }
 
-// leaveSidebar moves focus back to the pane you came from.
-func (m *Model) leaveSidebar() tea.Cmd {
+// openPopup shows the preview popup on the client looking at the sidebar.
+func (m *Model) openPopup(session string) tea.Cmd {
+	if m.popupOpen || m.selfPane == "" {
+		return nil
+	}
+	var cmd tea.Cmd
+	if m.link == nil {
+		l, err := listenLink(linkSocket(m.c.ServerName(), m.selfPane))
+		if err != nil {
+			return m.setToast("✗ preview popup: "+err.Error(), true)
+		}
+		m.link, cmd = l, l.wait()
+	}
+	m.popupOpen = true
+	c := m.c
+	return tea.Batch(cmd, func() tea.Msg {
+		client := c.ClientTTY
+		if client == "" && session != "" {
+			client = c.ActiveClient(session)
+		}
+		return popupMsg{client}
+	})
+}
+
+// linked takes a popup that connected; an older connection is dropped.
+func (m *Model) linked(conn *wireConn) tea.Cmd {
+	if m.conn != nil {
+		m.conn.close()
+	}
+	m.conn, m.published, m.overlaySent = conn, "", "\x00" // send everything again
+	return waitWire(conn)
+}
+
+// fromPopup handles a message from the popup: its size, a key, an fzf pick.
+func (m *Model) fromPopup(msg wireIn) (tea.Model, tea.Cmd) {
+	if msg.conn != m.conn {
+		return m, nil // an old connection
+	}
+	if msg.bye {
+		m.conn = nil
+		return m, nil
+	}
+	wait := waitWire(m.conn)
+	switch w := msg.m; w.Kind {
+	case "hello", "size":
+		m.popupW, m.popupH, m.overlaySent = w.W, w.H, "\x00"
+		return m, tea.Batch(wait, m.publishPreview())
+	case "key":
+		if w.Key != nil {
+			_, cmd := m.update(tea.KeyMsg(*w.Key))
+			return m, tea.Batch(wait, cmd)
+		}
+	case "prefix": // tmux gets these keys once the popup has closed
+		m.replay = w.Keys
+		return m, wait
+	case "picked":
+		var err error
+		if w.Err != "" {
+			err = fmt.Errorf("%s", w.Err)
+		}
+		_, cmd := m.update(dirPickedMsg{dir: w.Dir, err: err})
+		return m, tea.Batch(wait, cmd)
+	}
+	return m, wait
+}
+
+// modalInPopup reports whether dialogs are drawn in the popup instead of
+// the narrow sidebar.
+func (m *Model) modalInPopup() bool {
+	return m.sidebar && m.popupOpen && m.conn != nil && m.popupW > 0
+}
+
+// syncOverlay sends the open dialog, rendered for the popup, when it changed.
+func (m *Model) syncOverlay() {
+	if !m.modalInPopup() {
+		return
+	}
+	ov := ""
+	if m.modal != nil {
+		ov = m.modal.view(m.popupW, m.popupH)
+	}
+	if ov != m.overlaySent {
+		m.overlaySent = ov
+		m.conn.post(wire{Kind: "overlay", Overlay: ov})
+	}
+}
+
+// runPopup shows the popup; the command returns when the popup closes.
+func (m *Model) runPopup(client string) tea.Cmd {
+	c, pane, sock := m.c, m.selfPane, ""
+	if m.link != nil {
+		sock = m.link.ln.Addr().String()
+	}
+	return func() tea.Msg {
+		start := time.Now()
+		err := c.RunPreviewPopup(pane, client, sock)
+		return popupDoneMsg{err, time.Since(start)}
+	}
+}
+
+// popupMinOpen: a popup that "closes" sooner than this never opened.
+const popupMinOpen = 300 * time.Millisecond
+
+// popupDone handles the popup closing. When the sidebar did not close it
+// itself (esc, a switch), it was closed some other way: leave the sidebar
+// too, so focus is not stuck in it without a preview.
+func (m *Model) popupDone(err error, d time.Duration) tea.Cmd {
+	if keys := m.replay; keys != nil { // closed to hand a prefix key to tmux
+		m.replay, m.popupOpen = nil, false
+		c, client := m.c, m.popupClient
+		return func() tea.Msg {
+			c.SendClientKeys(client, keys)
+			time.Sleep(300 * time.Millisecond) // let the binding run
+			return replayedMsg{}
+		}
+	}
+	if !m.popupOpen {
+		return nil
+	}
+	m.popupOpen = false
+	if err != nil {
+		return m.setToast("✗ preview popup: "+err.Error(), true)
+	}
+	if d < popupMinOpen { // never really opened (another popup is open on the client)
+		return nil
+	}
+	if m.focused {
+		return m.leaveSidebar()
+	}
+	return nil
+}
+
+// previewInfo is what the popup should show: the pane, its title, and the
+// help context (as openHelp names it).
+func (m *Model) previewInfo() tmux.PreviewState {
+	ctx := m.helpCtx()
+	if m.page == pageAgents {
+		a, p := m.curAgent()
+		if a == nil || p == nil {
+			return tmux.PreviewState{Title: "select an agent", Context: ctx}
+		}
+		return tmux.PreviewState{Pane: p.ID, Context: ctx,
+			Title: p.Target() + " · " + string(a.Kind) + " · " + a.Label() + " " + agent.Age(a.Since, clock())}
+	}
+	p := m.previewTarget()
+	if p == nil || p.ID == m.selfPane {
+		return tmux.PreviewState{Title: "nothing to preview", Context: ctx}
+	}
+	return tmux.PreviewState{Pane: p.ID, Title: p.Target() + " · " + p.Command, Context: ctx}
+}
+
+// publishPreview tells the popup what to show when that changed. It stands
+// in for fetchPreview in the sidebar: the popup does the capturing.
+func (m *Model) publishPreview() tea.Cmd {
+	if !m.focused || !m.popupOpen || m.selfPane == "" {
+		return nil
+	}
+	st := m.previewInfo()
+	key := st.Pane + "\t" + st.Title + "\t" + st.Context
+	if key == m.published {
+		return nil
+	}
+	m.published = key
+	if m.conn != nil {
+		m.conn.post(wire{Kind: "state", State: &st})
+	}
+	return nil
+}
+
+// closePopup closes the preview popup (after a switch).
+func (m *Model) closePopup() tea.Cmd {
+	if !m.popupOpen {
+		return nil
+	}
+	m.popupOpen = false
+	c, client := m.c, m.popupClient
+	return func() tea.Msg { c.ClosePopup(client); return nil }
+}
+
+// unfocusSelf hands the focus in the sidebar's window back to the last pane
+// after a switch to another session, so coming back does not land in the
+// sidebar (and reopen the popup).
+func (m *Model) unfocusSelf() tea.Cmd {
+	if m.selfPane == "" {
+		return nil
+	}
 	c, pane := m.c, m.selfPane
 	return func() tea.Msg {
-		c.FocusLastPane(pane)
+		if out, _ := c.Run("display-message", "-p", "-t", pane, "#{pane_active}"); out == "1" {
+			c.FocusLastPane(pane)
+		}
 		return nil
+	}
+}
+
+// leaveSidebar closes the popup and moves focus back to the pane you came
+// from.
+func (m *Model) leaveSidebar() tea.Cmd {
+	c, pane, client, open := m.c, m.selfPane, m.popupClient, m.popupOpen
+	m.popupOpen = false // its popupDoneMsg must not leave a second time
+	return func() tea.Msg {
+		if open {
+			c.ClosePopup(client)
+		}
+		c.FocusLastPane(pane)
+		return popupClosedMsg{}
 	}
 }
 
 // sidebarOff closes every sidebar (including this one).
 func (m *Model) sidebarOff() tea.Cmd {
-	c := m.c
+	c, client, open := m.c, m.popupClient, m.popupOpen
+	m.popupOpen = false
 	return func() tea.Msg {
+		if open {
+			c.ClosePopup(client)
+		}
 		c.SidebarOff()
 		return nil
 	}
 }
 
-// compactView is shown while the sidebar is not focused (or too narrow).
-func (m *Model) compactView() bool {
-	return m.sidebar && (!m.focused || m.w < minFullWidth)
-}
-
-// viewCompact renders the narrow sidebar: sessions (the current one expanded
-// with its windows), an agents section and a hint.
-func (m *Model) viewCompact() string {
-	w, h := m.w, m.h
-	var curSess *tmux.Session
-	var curWin *tmux.Window
-	if m.tree != nil {
-		for _, p := range m.tree.Sidebars {
-			if p.ID == m.selfPane {
-				curWin = p.Window
-				curSess = p.Window.Session
-			}
-		}
-	}
-
-	var lines []string
-	m.compactCur = -1
-	if m.page == pageAgents {
-		lines = m.compactAgents(w)
-	} else {
-		lines = m.compactTmux(w, curSess, curWin)
-	}
-	return m.compactFrame(lines, w, h)
-}
-
-// compactHeader is "lazymux" with the agent counts on the right
-// ("⣿1 ⣾2 ●1"), as in the sidebar mockup.
+// compactHeader is the sidebar's first line: the agent counts as colored chips (" ◐1 " " ●2 "
+// " ✓1 ") on the left and "lazymux" on the right.
 func (m *Model) compactHeader(w int) string {
-	var right []seg
-	if sum := m.agentSummary(); sum != "" {
-		right = []seg{{sum + " ", lipgloss.NewStyle()}}
-	}
-	return renderRow([]seg{{" lazymux", stMauve.Bold(true)}}, right, w, 0)
-}
-
-// compactAgents is the narrow Agents page: the agents of the current tab
-// grouped by session, each with its summary line.
-func (m *Model) compactAgents(w int) []string {
-	lines := []string{m.compactHeader(w)}
-	if m.agentTab != agentAll {
-		lines = append(lines, divider(" "+strings.ToLower(agentTabNames[m.agentTab])+" ", w))
-	}
-	n := 0
-	for _, r := range m.agentRows() {
-		if r.a == nil {
-			lines = append(lines, "", renderRow([]seg{{" ▾ ", stFaint}, {r.sess.Name, stText.Bold(true)}}, []seg{headerBadge(r)}, w, 0))
-			continue
-		}
-		n++
-		lines = append(lines, m.compactAgentEntry(r.a, r.pane, w, false)...)
-	}
-	if n == 0 {
-		empty := "no agents running"
-		if m.agentTab != agentAll && m.agentCounts()[agentAll] > 0 {
-			empty = "no " + strings.ToLower(agentTabNames[m.agentTab]) + " agents"
-		}
-		lines = append(lines, "", " "+stSub.Render(empty))
-	}
-	return lines
-}
-
-// compactTmux is the narrow tmux page: every session with its windows
-// (the current session in bold, the current window marked; windows with an
-// agent show its state and age), then the agents.
-func (m *Model) compactTmux(w int, curSess *tmux.Session, curWin *tmux.Window) []string {
-	lines := []string{m.compactHeader(w)}
-	m.compactCur = -1
-	for _, s := range m.sessions() {
-		name := stSub
-		if s == curSess {
-			name = stText.Bold(true)
-		}
-		right := m.sessionBadge(s)
-		if right == nil {
-			right = []seg{{fmt.Sprintf("%dw ", len(s.Windows)), stFaint}}
-		}
-		lines = append(lines, renderRow([]seg{{" ▾ ", stFaint}, {s.Name, name}}, right, w, 0))
-		for _, win := range s.Windows {
-			mark, idx, st, sel := "   ", stFaint, stSub, 0
-			if win == curWin {
-				mark, idx, st, sel = " ▸ ", stBlue, stText, 2
-				m.compactCur = len(lines)
-			}
-			var right []seg
-			if a := m.worstAgent(win.Panes); a != nil {
-				right = []seg{{agentGlyph(a) + " " + agent.Age(a.Since, clock()) + " ", agentStyle(a)}}
-			} else if p := win.ActivePane(); p != nil {
-				right = []seg{{p.Command + " ", stFaint}}
-			}
-			lines = append(lines, renderRow(
-				[]seg{{" " + mark, stBlue}, {fmt.Sprintf("%d ", win.Index), idx}, {win.Name, st}}, right, w, sel))
+	st := agent.Count(m.agents, clock())
+	left := []seg{{" ", stText}}
+	for _, x := range []struct {
+		n      int
+		glyph  string
+		fg, bg lipgloss.TerminalColor
+	}{{st.Blocked, "◐", cRed, cRedBg}, {st.Working, "●", cYellow, cYellowBg}, {st.Done, "✓", cGreen, cGreenBg}} {
+		if x.n > 0 {
+			left = append(left, seg{fmt.Sprintf(" %s%d ", x.glyph, x.n),
+				lipgloss.NewStyle().Foreground(x.fg).Background(x.bg).Bold(true)}, seg{" ", stText})
 		}
 	}
-	lines = append(lines, "", divider(" agents ", w))
-	n := 0
-	for rank := 3; rank >= 0; rank-- { // blocked, working, done, idle
-		for _, s := range m.sessions() {
-			as, ps := m.sessionAgents(s)
-			for i, a := range as {
-				if urgency(a) == rank {
-					lines = append(lines, m.compactAgentEntry(a, ps[i], w, true)...)
-					n++
-				}
-			}
-		}
-	}
-	if n == 0 {
-		lines = append(lines, " "+stFaint.Render("no agents running"))
-	}
-	return lines
-}
-
-// compactAgentEntry is one agent in the narrow sidebar:
-//
-//	⣿ claude      api:3   2m
-//	  fix jwt expiry · Bash(go…
-//
-// The location includes the session when withSession is set (the agents
-// section lists agents of every session together).
-func (m *Model) compactAgentEntry(a *agent.Agent, p *tmux.Pane, w int, withSession bool) []string {
-	st := agentStyle(a)
-	loc := fmt.Sprintf("%d:%s", p.Window.Index, p.Window.Name)
-	if withSession {
-		loc = fmt.Sprintf("%s:%d", p.Window.Session.Name, p.Window.Index)
-	}
-	out := []string{renderRow(
-		[]seg{{" " + agentGlyph(a) + " ", st}, {string(a.Kind), stText.Bold(true)}},
-		[]seg{{loc + "  ", stFaint}, {agent.Age(a.Since, clock()) + " ", st}}, w, 0)}
-	var parts []string
-	if a.Summary != "" {
-		parts = append(parts, a.Summary)
-	}
-	if a.Waiting != "" {
-		parts = append(parts, a.Waiting)
-	}
-	if len(parts) > 0 {
-		out = append(out, renderRow([]seg{{"   " + strings.Join(parts, " · "), stFaint}}, nil, w, 0))
-	}
-	return out
-}
-
-// compactFrame pads lines to the pane and adds the hint at the bottom.
-func (m *Model) compactFrame(lines []string, w, h int) string {
-
-	hint := " " + stFaint.Render("focus to expand · ") + stKey.Render("?") + stFaint.Render(" keys")
-	body := h - 2 // hint line + its separator
-	// too long: scroll (below the header) so the current window stays visible
-	if len(lines) > body && m.compactCur > body-2 && body > 3 {
-		drop := min(m.compactCur-(body-2), len(lines)-body)
-		lines = append(lines[:1:1], lines[1+drop:]...)
-	}
-	if len(lines) > body {
-		lines = lines[:max(0, body)]
-	}
-	for len(lines) < body {
-		lines = append(lines, "")
-	}
-	lines = append(lines, stFaint.Render(strings.Repeat("─", w)), ansi.Truncate(hint, w, "…"))
-	for i, l := range lines {
-		if pad := w - ansi.StringWidth(l); pad > 0 {
-			lines[i] = l + strings.Repeat(" ", pad)
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-// divider renders "─ title ─────" across w columns.
-func divider(title string, w int) string {
-	return stFaint.Render(ansi.Truncate("─"+title+strings.Repeat("─", max(0, w-ansi.StringWidth(title)-1)), w, ""))
+	return renderRow(left, []seg{{"lazymux ", stMauve.Bold(true)}}, w, 0)
 }

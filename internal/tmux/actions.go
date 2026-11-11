@@ -3,6 +3,7 @@ package tmux
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -247,4 +248,9 @@ func ServerFromEnv(env string) string {
 		return "default"
 	}
 	return filepath.Base(path)
+}
+
+// CaptureHistory is CapturePane plus up to n lines of scrollback.
+func (c *Client) CaptureHistory(paneID string, n int) (string, error) {
+	return c.Run("capture-pane", "-e", "-p", "-S", "-"+strconv.Itoa(n), "-t", paneID)
 }

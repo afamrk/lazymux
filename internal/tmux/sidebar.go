@@ -95,6 +95,48 @@ func (c *Client) SidebarToggle() error {
 	return c.SidebarFollow(sess)
 }
 
+// SidebarCycle is the one key for the sidebar (bind it to prefix + b):
+// when sidebars are off it opens one and moves into it, when the session's
+// sidebar is open it moves into it, and when you are in it (pane is the
+// sidebar) it closes all of them. session and pane are where the key was
+// pressed ('#{session_id}', '#{pane_id}' in the binding).
+func (c *Client) SidebarCycle(session, pane string) error {
+	if session == "" || pane == "" {
+		out, err := c.Run("display-message", "-p", "#{session_id}\t#{pane_id}")
+		if err != nil {
+			return err
+		}
+		session, pane, _ = strings.Cut(out, "\t")
+	}
+	if c.SidebarsOn() {
+		if mine := c.sessionSidebar(session); mine == pane && mine != "" {
+			return c.SidebarOff()
+		}
+	} else if err := c.SidebarToggle(); err != nil {
+		return err
+	}
+	if err := c.SidebarFollow(session); err != nil { // creates or docks it
+		return err
+	}
+	mine := c.sessionSidebar(session)
+	if mine == "" {
+		return fmt.Errorf("no sidebar in session %s", session)
+	}
+	_, err := c.Run("select-pane", "-t", mine)
+	return err
+}
+
+// sessionSidebar is the pane of session's sidebar, or "".
+func (c *Client) sessionSidebar(session string) string {
+	refs, _ := c.sidebars()
+	for _, r := range refs {
+		if r.session == session {
+			return r.pane
+		}
+	}
+	return ""
+}
+
 // SidebarOff closes every sidebar and removes the hooks.
 func (c *Client) SidebarOff() error {
 	c.Run("set-option", "-gu", sidebarOnOpt)
@@ -196,4 +238,134 @@ func (c *Client) FocusLastPane(sidebar string) error {
 	}
 	_, err := c.Run("select-pane", "-R", "-t", sidebar) // no last pane: the one to the right
 	return err
+}
+
+// The preview popup: while the sidebar is focused, a display-popup on its
+// right shows the selected pane and the sidebar's dialogs. The two programs
+// talk over a unix socket (see internal/ui/link.go).
+
+// PreviewState is what the sidebar tells its popup: the pane to show, the
+// title, and the help context (the focused panel or "Agents").
+type PreviewState struct{ Pane, Title, Context string }
+
+// ActiveClient returns the tty of the most recently active client attached
+// to session ("" when none is attached).
+func (c *Client) ActiveClient(session string) string {
+	out, err := c.Run("list-clients", "-t", session, "-F", "#{client_activity}\t#{client_tty}")
+	if err != nil {
+		return ""
+	}
+	best, bestAct := "", -1
+	for _, l := range strings.Split(out, "\n") {
+		f := strings.SplitN(l, "\t", 2)
+		if len(f) == 2 && atoi(f[0]) > bestAct {
+			best, bestAct = f[1], atoi(f[0])
+		}
+	}
+	return best
+}
+
+// popupGeometry is where the preview popup goes: next to the sidebar, a
+// share of the space on its right (@lazymux-preview-width, default 70%) and
+// of its height (@lazymux-preview-height, default 70%), centered vertically.
+type popupGeometry struct {
+	x, y, w, h int // y is the popup's bottom edge (display-popup's -y)
+}
+
+const (
+	previewWidthOpt  = "@lazymux-preview-width"  // percent of the space right of the sidebar
+	previewHeightOpt = "@lazymux-preview-height" // percent of the sidebar's height
+	defPreviewWidth  = 70
+	defPreviewHeight = 70
+)
+
+// previewPopupGeometry queries the sidebar's place in client coordinates
+// (a status line at the top shifts everything down).
+func (c *Client) previewPopupGeometry(sidebar string) (popupGeometry, error) {
+	out, err := c.Run("display-message", "-p", "-t", sidebar,
+		"#{pane_left}\t#{pane_width}\t#{pane_top}\t#{pane_height}\t#{window_width}\t#{status}\t#{status-position}"+
+			"\t#{"+previewWidthOpt+"}\t#{"+previewHeightOpt+"}")
+	if err != nil {
+		return popupGeometry{}, err
+	}
+	f := strings.Split(out, "\t")
+	if len(f) != 9 {
+		return popupGeometry{}, fmt.Errorf("unexpected display-message output %q", out)
+	}
+	left, pw, top, ph, ww := atoi(f[0]), atoi(f[1]), atoi(f[2]), atoi(f[3]), atoi(f[4])
+	if f[6] == "top" {
+		top += statusLines(f[5])
+	}
+	return popupPlace(left, pw, top, ph, ww, percent(f[7], defPreviewWidth), percent(f[8], defPreviewHeight)), nil
+}
+
+// popupPlace computes the geometry from the sidebar's position and size.
+func popupPlace(left, pw, top, ph, ww, wPct, hPct int) popupGeometry {
+	x := left + pw + 1 // skip the border
+	w := max(20, (ww-x)*wPct/100)
+	w = min(w, max(1, ww-x))
+	h := min(ph, max(5, ph*hPct/100))
+	t := top + (ph-h)/2
+	return popupGeometry{x: x, y: t + h, w: w, h: h}
+}
+
+// percent parses an option like "60" or "60%" (1–100), or returns def.
+func percent(v string, def int) int {
+	n := atoi(strings.TrimSuffix(strings.TrimSpace(v), "%"))
+	if n < 1 || n > 100 {
+		return def
+	}
+	return n
+}
+
+// statusLines is the height of the status line for the status option.
+func statusLines(v string) int {
+	switch v {
+	case "off", "":
+		return 0
+	case "on":
+		return 1
+	}
+	return atoi(v)
+}
+
+// previewPopupArgs is the borderless display-popup command for the preview.
+func (c *Client) previewPopupArgs(sidebar, client, socket string, g popupGeometry) []string {
+	args := []string{"display-popup", "-E", "-B"}
+	if client != "" {
+		args = append(args, "-c", client)
+	}
+	return append(args, "-t", sidebar,
+		"-x", strconv.Itoa(g.x), "-y", strconv.Itoa(g.y), "-w", strconv.Itoa(g.w), "-h", strconv.Itoa(g.h),
+		c.sidebarCommand("preview", sidebar, shQuote(socket)))
+}
+
+// RunPreviewPopup shows the preview popup next to the sidebar on client,
+// connecting to the sidebar's socket, and waits until the popup is closed.
+func (c *Client) RunPreviewPopup(sidebar, client, socket string) error {
+	g, err := c.previewPopupGeometry(sidebar)
+	if err != nil {
+		return err
+	}
+	_, err = c.Run(c.previewPopupArgs(sidebar, client, socket, g)...)
+	return err
+}
+
+// SendClientKeys has client handle keys as if you typed them (its key
+// table, so a prefix starts a binding).
+func (c *Client) SendClientKeys(client string, keys []string) {
+	args := []string{"send-keys", "-K"}
+	if client != "" {
+		args = append(args, "-c", client)
+	}
+	c.Run(append(args, keys...)...)
+}
+
+// ClosePopup closes the popup open on client (if any).
+func (c *Client) ClosePopup(client string) {
+	args := []string{"display-popup", "-C"}
+	if client != "" {
+		args = append(args, "-c", client)
+	}
+	c.Run(args...)
 }

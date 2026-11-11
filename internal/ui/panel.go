@@ -19,6 +19,18 @@ type seg struct {
 // sel is 0 (none), 1 (selected in unfocused panel), 2 (selected, focused) or
 // 3 (selected, focused, not bold: the second line of a two-line row).
 func renderRow(left, right []seg, width int, sel int) string {
+	var bg lipgloss.TerminalColor
+	switch sel {
+	case 1:
+		bg = cSelDim
+	case 2, 3:
+		bg = cSurface0
+	}
+	return renderRowBg(left, right, width, bg, sel == 2)
+}
+
+// renderRowBg is renderRow with any background (nil: none) and optional bold.
+func renderRowBg(left, right []seg, width int, bg lipgloss.TerminalColor, bold bool) string {
 	rw := segsWidth(right)
 	if rw > width {
 		right, rw = nil, 0
@@ -30,18 +42,11 @@ func renderRow(left, right []seg, width int, sel int) string {
 	left = truncSegs(left, avail)
 	lw := segsWidth(left)
 
-	var bg lipgloss.TerminalColor
-	switch sel {
-	case 1:
-		bg = cSelDim
-	case 2, 3:
-		bg = cSurface0
-	}
 	style := func(st lipgloss.Style) lipgloss.Style {
 		if bg != nil {
 			st = st.Background(bg)
 		}
-		if sel == 2 {
+		if bold {
 			st = st.Bold(true)
 		}
 		return st

@@ -15,7 +15,7 @@ type binding struct {
 }
 
 var bindings = []binding{
-	{"j / k", "move down / up", "Navigation", 0, "", false},
+	{"j / k", "move down / up (also ctrl+j / ctrl+k, ↓ / ↑)", "Navigation", 0, "", false},
 	{"g / G", "first / last", "Navigation", 0, "", false},
 	{"h / l, tab", "previous / next panel", "Navigation", 0, "", false},
 	{"1 2 3", "jump to panel", "Navigation", 0, "", false},
@@ -23,7 +23,8 @@ var bindings = []binding{
 	{"f", "find: jump anywhere, agents too (also ctrl+p)", "Navigation", 0, "f", false},
 
 	{"enter", "switch to selection", "Sessions & windows", 0, "enter", false},
-	{"n", "new (session / window / pane)", "Sessions & windows", 0, "n", false},
+	{"n", "open project (zoxide, git repos)", "Sessions & windows", 0, "n", false},
+	{"N", "new (session / window / pane)", "Sessions & windows", 0, "N", false},
 	{"r", "rename", "Sessions & windows", 0, "r", false},
 	{"d", "kill selection or cursor item (asks)", "Sessions & windows", 0, "d", false},
 	{"u", "undo last kill", "Sessions & windows", 0, "u", false},
@@ -46,8 +47,12 @@ var bindings = []binding{
 	{"v", "select range (from last space)", "Selection", 1, "v", false},
 	{"esc", "clear selection, then filter", "Selection", 1, "", false},
 
-	{"a", "switch page (tmux ⇄ agents)", "Global", 1, "a", false},
-	{"N", "open project (zoxide, git repos)", "Global", 1, "N", false},
+	{"tab", "sidebar: jump agents ⇄ sessions", "Sidebar list", 1, "tab", false},
+	{"l / h", "sidebar: unfold / fold (step in / out)", "Sidebar list", 1, "", false},
+	{"B", "sidebar: next agent that needs you", "Sidebar list", 1, "B", false},
+	{"N", "sidebar: new — on an agent row, a new agent", "Sidebar list", 1, "N", false},
+	{"a", "full screen only: switch page (tmux ⇄ agents)", "Global", 1, "a", false},
+	{"N", "open project (Agents page)", "Agents", 1, "", false},
 	{"?", "this help", "Global", 1, "", false},
 	{"q", "quit (sidebar: back to your pane)", "Global", 1, "q", false},
 	{"Q", "turn the sidebar off", "Global", 1, "Q", false},
@@ -66,4 +71,16 @@ func keyMsg(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyCtrlP}
 	}
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+}
+
+// arrowKeys makes ctrl+j / ctrl+k the down / up arrows everywhere: lists,
+// panels, dialogs and pickers.
+func arrowKeys(k tea.KeyMsg) tea.KeyMsg {
+	switch k.Type {
+	case tea.KeyCtrlJ:
+		return tea.KeyMsg{Type: tea.KeyDown, Alt: k.Alt}
+	case tea.KeyCtrlK:
+		return tea.KeyMsg{Type: tea.KeyUp, Alt: k.Alt}
+	}
+	return k
 }

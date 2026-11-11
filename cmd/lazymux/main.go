@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"syscall"
 
@@ -38,6 +39,16 @@ func main() {
 		case "sidebar":
 			sidebar(c, args[1:])
 			return
+		case "preview": // the sidebar's preview popup
+			if len(args) != 3 {
+				fmt.Fprintln(os.Stderr, "usage: lazymux preview <sidebar-pane> <socket>")
+				os.Exit(2)
+			}
+			if _, err := tea.NewProgram(ui.NewPreview(c, args[2]), tea.WithAltScreen()).Run(); err != nil {
+				fmt.Fprintln(os.Stderr, "lazymux:", err)
+				os.Exit(1)
+			}
+			return
 		case "hook": // called by Claude Code hooks; must stay quiet and fast
 			agent.RunHook(args[1:], os.Stdin, os.Stdout)
 			return
@@ -57,9 +68,10 @@ func main() {
 				os.Exit(2)
 			}
 			cfg := agent.LoadConfig(c)
-			fmt.Printf("delivery %v, notify on %v, delay %v, sound %v\n", cfg.Delivery, cfg.On, cfg.Delay, cfg.Sound)
-			agent.DeliverSync(c, cfg, agent.Note{Kind: agent.NoteBlocked, Title: "claude needs you",
-				Body: "api:3 · Bash(go test ./...)  (lazymux notify test)"})
+			fmt.Printf("delivery %v, notify on %v, delay %v, min work %v, sound %v\n",
+				cfg.Delivery, cfg.On, cfg.Delay, cfg.MinWork, cfg.Sound)
+			agent.DeliverSync(c, cfg, agent.Note{Kind: agent.NoteBlocked, Title: "Claude needs you",
+				Detail: "Bash(go test ./...)", Place: "api · 3:editor  (lazymux notify test)"})
 			return
 		}
 	}
@@ -81,22 +93,34 @@ func main() {
 	}
 }
 
-// sidebar handles `lazymux sidebar [toggle|follow <session>|off]`. Without a
+// sidebar handles `lazymux sidebar [toggle|cycle|follow <session>|off]`. Without a
 // subcommand it runs the UI inside the sidebar pane.
 func sidebar(c *tmux.Client, args []string) {
 	var err error
 	switch {
 	case len(args) == 0:
 		m := ui.NewSidebar(c)
+		// the pane is killed with SIGHUP (sidebar off, kill-pane): remove the
+		// popup socket on the way out
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, syscall.SIGHUP, syscall.SIGTERM)
+		go func() { <-sig; m.Close(); os.Exit(0) }()
 		_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithReportFocus()).Run()
+		m.Close()
 	case args[0] == "toggle":
 		err = c.SidebarToggle()
+	case args[0] == "cycle": // the one key: open + focus, focus, close
+		session, pane := "", ""
+		if len(args) == 3 {
+			session, pane = args[1], args[2]
+		}
+		err = c.SidebarCycle(session, pane)
 	case args[0] == "off":
 		err = c.SidebarOff()
 	case args[0] == "follow" && len(args) == 2:
 		err = c.SidebarFollow(args[1])
 	default:
-		err = fmt.Errorf("usage: lazymux sidebar [toggle | off | follow <session-id>]")
+		err = fmt.Errorf("usage: lazymux sidebar [toggle | cycle [<session-id> <pane-id>] | off | follow <session-id>]")
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "lazymux:", err)

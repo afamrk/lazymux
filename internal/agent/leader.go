@@ -141,7 +141,7 @@ func CurrentStatus(c *tmux.Client) Status {
 	return st
 }
 
-// FormatStatus renders "⣿1 ⣾2 ●1", leaving out states with no agents. With
+// FormatStatus renders "◐1 ●2 ✓1", leaving out states with no agents. With
 // tmux set, colors are tmux style tags (#[fg=…]) for status-right.
 func FormatStatus(st Status, tmuxStyle bool) string {
 	var parts []string
@@ -150,9 +150,9 @@ func FormatStatus(st Status, tmuxStyle bool) string {
 		glyph string
 		color string
 	}{
-		{st.Blocked, "⣿", "#f38ba8"},
-		{st.Working, "⣾", "#f9e2af"},
-		{st.Done, "●", "#a6e3a1"},
+		{st.Blocked, "◐", "#f38ba8"},
+		{st.Working, "●", "#f9e2af"},
+		{st.Done, "✓", "#a6e3a1"},
 	} {
 		if x.n == 0 {
 			continue

@@ -45,7 +45,7 @@ var agentTabStyle = [numAgentTabs]lipgloss.Style{
 	stGreen,
 }
 
-// agentGlyph / agentStyle: ⣿ blocked (red), ⣾ working (yellow), ● done
+// agentGlyph / agentStyle: ◐ blocked (red), ● working (yellow), ✓ done
 // (green: finished, not looked at yet), ○ idle (dim: seen).
 func agentGlyph(a *agent.Agent) string {
 	if a.State == agent.Idle && !a.Unseen {
@@ -77,11 +77,32 @@ func urgency(a *agent.Agent) int {
 func stateGlyph(s agent.State) string {
 	switch s {
 	case agent.Blocked:
-		return "⣿"
+		return "◐"
 	case agent.Working:
-		return "⣾"
+		return "●"
 	}
-	return "●"
+	return "✓"
+}
+
+// kindIcon is a small icon per agent program, in its own color: ✻ Claude
+// Code (its own mark, in Claude's orange), ⬡ Codex, ✦ Gemini, ⌬ opencode,
+// ◈ aider, ▲ agy.
+func kindIcon(k agent.Kind) seg {
+	switch k {
+	case agent.Claude:
+		return seg{"✻", stPeach}
+	case agent.Codex:
+		return seg{"⬡", stTeal}
+	case agent.Gemini:
+		return seg{"✦", stBlue}
+	case agent.Opencode:
+		return seg{"⌬", lipgloss.NewStyle().Foreground(cSky)}
+	case agent.Aider:
+		return seg{"◈", stGreen}
+	case agent.Agy:
+		return seg{"▲", stMauve}
+	}
+	return seg{"◆", stSub}
 }
 
 func stateStyle(s agent.State) lipgloss.Style {
@@ -109,7 +130,7 @@ func (m *Model) detectAgents() tea.Cmd {
 		// one lazymux per server notifies and keeps the status file
 		if leader != nil && notifier != nil && leader.Acquire() {
 			cfg, now := agent.LoadConfig(c), time.Now()
-			for _, n := range notifier.Observe(agents, t, cfg, now) {
+			for _, n := range notifier.Observe(agents, t, c.WatchedPanes(now), cfg, now) {
 				go agent.Deliver(c, cfg, n)
 			}
 			_ = agent.WriteStatus(c.ServerName(), agent.Count(agents, now))
@@ -121,7 +142,7 @@ func (m *Model) detectAgents() tea.Cmd {
 // markSeen turns the selected agent from "done" into "idle" once you look
 // at it on the full Agents page.
 func (m *Model) markSeen() {
-	if m.page != pageAgents || m.compactView() {
+	if m.page != pageAgents || (m.sidebar && !m.focused) { // not while you are not looking
 		return
 	}
 	if a, _ := m.curAgent(); a != nil && a.Unseen {
@@ -386,23 +407,6 @@ func (m *Model) agentCounts() [numAgentTabs]int {
 	return c
 }
 
-// agentSummary renders "⣿1 ⣾2 ●1" like `lazymux status`: blocked,
-// working and done-but-unseen agents; states with none are left out.
-func (m *Model) agentSummary() string {
-	st := agent.Count(m.agents, clock())
-	var parts []string
-	for _, x := range []struct {
-		n     int
-		glyph string
-		style lipgloss.Style
-	}{{st.Blocked, "⣿", stRed}, {st.Working, "⣾", stYellow}, {st.Done, "●", stGreen}} {
-		if x.n > 0 {
-			parts = append(parts, x.style.Render(fmt.Sprintf("%s%d", x.glyph, x.n)))
-		}
-	}
-	return strings.Join(parts, " ")
-}
-
 // --- keys ----------------------------------------------------------------------
 
 // handleAgentKey handles keys on the Agents page. Keys that are not handled
@@ -606,15 +610,15 @@ func (m *Model) agentTabsTitleWith(sep string, names [numAgentTabs]string) strin
 	return out + " "
 }
 
-// headerBadge is the worst state of a session: ⣿N, ⣾N or ●.
+// headerBadge is the worst state of a session: ◐N, ●N or ✓N.
 func headerBadge(r agentRow) seg {
 	switch {
 	case r.blocked > 0:
-		return seg{fmt.Sprintf("⣿%d ", r.blocked), stRed}
+		return seg{fmt.Sprintf("◐%d ", r.blocked), stRed}
 	case r.working > 0:
-		return seg{fmt.Sprintf("⣾%d ", r.working), stYellow}
+		return seg{fmt.Sprintf("●%d ", r.working), stYellow}
 	case r.done > 0:
-		return seg{fmt.Sprintf("●%d ", r.done), stGreen}
+		return seg{fmt.Sprintf("✓%d ", r.done), stGreen}
 	}
 	return seg{"○ ", stFaint}
 }
@@ -636,7 +640,7 @@ func (m *Model) agentLines(r agentRow, w, sel int) []string {
 		kind = stSub.Bold(true)
 	}
 	l1 := renderRow(
-		[]seg{{" ", stText}, {agentGlyph(a) + " ", st}, {string(a.Kind) + " ", kind},
+		[]seg{{" ", stText}, {agentGlyph(a) + " ", st}, kindIcon(a.Kind), {" " + string(a.Kind) + " ", kind},
 			{fmt.Sprintf("%d:%s", p.Window.Index, p.Window.Name), stSub}},
 		[]seg{{a.Label() + " " + agent.Age(a.Since, clock()) + " ", st}}, w, sel)
 
@@ -802,7 +806,7 @@ func (m *Model) eventLine(e agent.Event, w int, pending bool) (string, bool) {
 			bg := lipgloss.Color("#3b2633")
 			// the whole row is tinted; "pending" follows the (shortened) detail
 			tail := seg{"  pending ", stRed.Background(bg)}
-			left := truncSegs([]seg{{" ⣿ ", stRed.Background(bg)}, {name, stRed.Bold(true).Background(bg)},
+			left := truncSegs([]seg{{" ◐ ", stRed.Background(bg)}, {name, stRed.Bold(true).Background(bg)},
 				{e.Detail, stText.Background(bg)}}, w-segsWidth([]seg{tail}))
 			left = append(left, tail)
 			var b strings.Builder
@@ -836,7 +840,7 @@ func (m *Model) viewAgentsPreview(w, h int) string {
 	return renderBox(title, "", lines, w, h, false)
 }
 
-// pageIndicator renders "⣿1 ⣾2 ●1  tmux │ agents" with the current page
+// pageIndicator renders "◐1 ●2 ✓1  tmux │ agents" with the current page
 // highlighted.
 func (m *Model) pageIndicator() string {
 	on := stTitleOn.Background(cSurface0)
@@ -868,7 +872,7 @@ func (m *Model) agentBar(last kd) []kd {
 // clock returns the time; tests replace it.
 var clock = time.Now
 
-// --- badges on the tmux page and in the compact sidebar -----------------------
+// --- badges on the tmux page and in the sidebar ---------------------------------
 
 // worstAgent is the most urgent agent among panes (blocked > working > idle).
 func (m *Model) worstAgent(panes []*tmux.Pane) *agent.Agent {
@@ -881,7 +885,7 @@ func (m *Model) worstAgent(panes []*tmux.Pane) *agent.Agent {
 	return worst
 }
 
-// sessionBadge is "⣿1 " / "⣾2 " / "● " for a session with agents.
+// sessionBadge is "◐1 " / "●2 " / "✓1 " for a session with agents.
 func (m *Model) sessionBadge(s *tmux.Session) []seg {
 	as, _ := m.sessionAgents(s)
 	if len(as) == 0 {

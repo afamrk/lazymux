@@ -16,31 +16,38 @@
 
 ## The sidebar
 
-lazymux lives in a **sidebar**: a pane on the left of your current window. Everything else in this guide describes what you see when the sidebar is focused (or when you run plain `lazymux` full screen).
+lazymux lives in a **sidebar**: a pane on the left of your current window. Focused, the sidebar is **one list** of your agents and sessions with a cursor (below). Plain `lazymux` run full screen keeps the lazygit-style panels and the Agents page that most of this guide describes; the actions and dialogs are the same in both.
 
 ```tmux
 set -g focus-events on
-bind b run-shell "lazymux sidebar toggle"
+bind b run-shell -b "lazymux sidebar cycle '#{session_id}' '#{pane_id}'"
 ```
 
-- **`prefix` + `b`** turns the sidebar on or off. "On" is global: every session gets its own sidebar, and it **follows you**. A tmux hook moves it into whichever window becomes current, so it is always docked on the left, full height, 30 columns wide.
-- **Unfocused**, it is a compact overview: `lazymux` and the current page at the top, then every session with its windows (the current session in bold, `▸` marking the window you are in), and an agents section listing every agent, blocked ones first, each with its summary line. The header shows the agent totals (`⣿1 ⣾2 ●1`); sessions carry a badge (`⣿1`) and windows with an agent show its state and age (`⣿ 2m`) instead of the command (see [Agents](#agents)). On the Agents page it shows the agents of the current tab, grouped by session. If the list is longer than the pane, it scrolls so your current window stays visible.
-- **Focus it** like any other pane (`prefix` + `←`, a mouse click, `select-pane -L`). It grows to **60% of the window** and shows the full lazymux described in this guide: the three panels, a preview (smaller than when lazymux runs full screen), the Agents page, dialogs and help.
-- **Leave it** with `esc` or `q` (focus goes back to the pane you came from), or move to another pane yourself. It shrinks back to 30 columns.
-- **`enter`** switches to the selection and the sidebar stays. Focus moves to the target, so the sidebar shrinks, and if you went to another window the sidebar moves there too.
+- **`prefix` + `b`** is the one sidebar key: when the sidebar is closed it opens it and moves you into it; from another pane it moves you into it; in the sidebar it closes it (`lazymux sidebar cycle`; `lazymux sidebar toggle` only opens / closes). Your other prefix keys work while you are in the sidebar too: its popup catches the prefix and the next key, closes, and hands them to tmux (it opens again if you are still in the sidebar afterwards). "On" is global: every session gets its own sidebar, and it **follows you**. A tmux hook moves it into whichever window becomes current, so it is always docked on the left, full height, 30 columns wide.
+- **Unfocused**, it is a compact overview. At the top, the agent totals as colored chips (`◐1` red, `●2` yellow, `✓1` green) and `lazymux`; then the agents grouped by state, most urgent first: **◐ NEEDS YOU** (blocked), **● WORKING**, **✓ DONE** (finished, not looked at yet), **○ IDLE**. Each agent is a two-line card: a bar in its state's color (thin and dimmed when idle), its icon (`✻` Claude Code, `⬡` Codex, `✦` Gemini, `⌬` opencode, `◈` aider, `▲` agy), its place (`api:3`) and age, and below what it waits for (`? Bash(go test ./...)`) or what it is doing (`▷ fix jwt expiry`); an agent that needs you gets a red-tinted card. Below, under **SESSIONS**, every session with its windows: your session is a highlighted chip and your window (`▸`) a brighter one, sessions without agents are dimmed, sessions show their window count and an agent badge (`◐1`), and windows with an agent show its icon and state in words (`✻ ● working 40s`) instead of the command. The footer counts sessions and windows. On the Agents page it shows the agents of the current tab, grouped by session. If the list is longer than the pane, it scrolls so your current window stays visible.
+- **Focus it** like any other pane (`prefix` + `←`, a mouse click, `select-pane -L`). It **keeps its 30 columns** (your other panes are never resized) and becomes **one list with a cursor**: the same agents and sessions as the overview, plus a `/ filter…` line. There are no pages or panels (no `a`): `j` / `k` run from the agents down into the sessions, and the keys act on the row under the cursor, listed at the bottom:
+  - **on an agent**: `1` / `2` / `3` answer its prompt, `i` reply, `x` stop it, `enter` jump to it, `N` start a new agent;
+  - **on a session**: `enter` switch, `N` new, `r` rename, `d` kill, `space` select;
+  - **on a window**: `enter`, `N` new window, `r`, `d`, `m` move, `s` swap, `L` layout;
+  - **on a pane**: `enter`, `N` split, `r` title, `d`, `z` zoom, `b` break out, `m` join;
+  - anywhere: `tab` jumps between the agents and the sessions, `B` to the next agent that needs you, `l` / `h` unfold / fold a session or window (and step in / out), `/` filters everything (agents by program, place or summary; sessions, windows and panes by name or command), `n` opens a project, `f` finds anything, `u` undoes a kill, `?` lists every key.
+
+  The sessions are a folding tree: your session starts open, the others folded (`▸`); a window with several panes unfolds into them. On focus the cursor goes to the first agent that needs you, else your window. The **preview opens in a popup** on the right of the sidebar, over your panes, and shows whatever the cursor is on. While the popup is open tmux sends your keys to it, and it passes them on to the sidebar, so everything works as if you typed into the sidebar. **Dialogs open in the popup** too, where there is room for them, and `ctrl+f` in a directory field runs fzf there. The popup takes 70% of the width to the right of the sidebar and 70% of its height, centered vertically; change that with `set -g @lazymux-preview-width 80` and `set -g @lazymux-preview-height 90` (percent, read each time it opens). Two keys stay in the popup: `ctrl+u` / `ctrl+d` scroll the preview half a page up / down through the pane's scrollback (2000 lines); it jumps back to the bottom when the cursor moves to another pane. Two lines at the bottom of the popup list the keys for the cursor row and end with `ctrl+u/d scroll · ? help · esc close` (and `↑ N lines` first while scrolled up).
+- **Leave it** with `esc` or `q` (focus goes back to the pane you came from), or move to another pane yourself. The popup closes.
+- **`enter`** switches to the selection and the sidebar stays. Focus moves to the target and the popup closes; if you went to another window the sidebar moves there too.
 - **`Q`** turns the sidebar off everywhere, like `prefix` + `b`.
 
 Other details:
-- The sidebar pane is invisible to lazymux itself. It is not listed in the Panes panel, not counted, never previewed, and moves, kills and undo never touch it.
+- The sidebar pane is invisible to lazymux itself. It is not listed among the panes, not counted, never previewed, and moves, kills and undo never touch it.
 - If a layout change (`L`, `select-layout`, a new split) pushes the sidebar out of place, it docks itself back within a second. Zooming another pane (`z` / `prefix` + `z`) is left alone.
 - Without `focus-events on`, lazymux still notices focus changes, but only within a second.
 - Killing the window the sidebar is in kills the sidebar too; a new one appears in the next current window.
 
 **Without the sidebar.** Run `lazymux` in any pane or terminal. `enter` switches and lazymux exits. Outside tmux, `enter` replaces lazymux with `tmux attach` to the chosen session. `--client '#{client_tty}'` pins switching to one terminal when several are attached (useful in a `display-popup` binding).
 
-## The screen
+## Full-screen lazymux
 
-This is the focused sidebar (or plain `lazymux`):
+The rest of this guide describes plain `lazymux` run full screen, with the lazygit-style panels. The actions, dialogs and keys are the same ones the sidebar list uses on its rows (rename, kill, move, swap, undo, find, projects, answer…); only the layout and the navigation differ.
 
 ```
 ╭─[1] Sessions ───────────╮╭─ session:window.%pane · command ─────────────╮
@@ -55,15 +62,15 @@ This is the focused sidebar (or plain `lazymux`):
  context-aware key hints                                    tmux │ agents
 ```
 
-**Two pages.** lazymux has a **tmux page** (described here) and an **Agents page**. Press `a` to switch between them; the right end of the bottom bar shows which one you are on (`tmux │ agents`), and each page keeps its own selection and focus.
+**Two pages.** Full-screen lazymux has a **tmux page** (described here) and an **Agents page**. Press `a` to switch between them (the sidebar has no pages); the right end of the bottom bar shows which one you are on (`tmux │ agents`), and each page keeps its own selection and focus.
 
 **Agents page**: the coding agents in all sessions, their state, and what they wait for. See [Agents](#agents).
 
 **Left column** of the tmux page: three panels, like lazygit.
 
-- **[1] Sessions** lists every session. `●` (green) before the name means a client is attached to it. The number on the right is its window count (`3w`), preceded by an agent badge when the session runs agents: `⣿2` (two blocked), `⣾1` (one working) or `●` (all done).
+- **[1] Sessions** lists every session. `●` (green) before the name means a client is attached to it. The number on the right is its window count (`3w`), preceded by an agent badge when the session runs agents: `◐2` (two blocked), `●1` (one working) or `✓1` (one done).
 - **[2] Windows** lists the windows of the selected session: index, name, the state glyph of its most urgent agent, pane count when there is more than one (`2p`), the command running in the active pane, and `*` on the session's active window.
-- **[3] Panes** lists the panes of the selected window: pane id (`%12`), command, the agent state (`⣿ blocked`) for agent panes, size, and `*` on the active pane.
+- **[3] Panes** lists the panes of the selected window: pane id (`%12`), command, the agent state (`◐ blocked`) for agent panes, size, and `*` on the active pane.
 
 Selection **cascades**: choosing a session shows its windows (starting at its active window), and choosing a window shows its panes (starting at its active pane).
 
@@ -71,7 +78,7 @@ The **focused** panel has a blue border and a bold, highlighted row. Panel sizes
 
 Each panel shows `n of m` in its bottom border: the position of the selection.
 
-**Right side**: the live preview of the selected pane. It is the pane's visible screen with its colors, refreshed every second. The border shows `session:window.%pane · command`. The sidebar pane itself is never shown or listed. If you run plain `lazymux` in a normal pane and the session or window you select resolves to that pane, the preview shows the pane you came from instead (the window's last pane, or the session's last window); the border names the pane actually shown. Only when you select lazymux's own pane in the Panes panel does it say "(this is lazymux itself)", instead of drawing a picture inside a picture.
+**Right side**: the live preview of the selected pane. It is the pane's visible screen with its colors, refreshed every second. The border shows `session:window.%pane · command`. The sidebar pane itself is never shown or listed. If you run `lazymux` in a normal pane and the session or window you select resolves to that pane, the preview shows the pane you came from instead (the window's last pane, or the session's last window); the border names the pane actually shown. Only when you select lazymux's own pane in the Panes panel does it say "(this is lazymux itself)", instead of drawing a picture inside a picture.
 
 **Bottom bar**: key hints for the focused panel; while items are selected it shows `◆ N selected` and what you can do with them. Hints that don't fit are dropped; `?` always lists everything.
 
@@ -91,7 +98,7 @@ lazymux starts with the session, window and pane you are currently in already se
 
 ## Switching
 
-`enter` switches to the selection. The sidebar stays open (it shrinks, because focus moves to the target); plain `lazymux` exits.
+`enter` switches to the selection. In the sidebar, focus moves to the target and the sidebar stays; plain `lazymux` exits.
 
 - in **Sessions**: switch to that session, keeping its current window
 - in **Windows**: select that window and switch to its session
@@ -101,7 +108,7 @@ Inside tmux, the client showing the sidebar is switched (plain `lazymux` can be 
 
 ## Creating and renaming
 
-**`n` (new)** depends on the focused panel:
+**`N` (new)** depends on the focused panel:
 
 - **Sessions**: opens the *New session* dialog.
   - **Name**: the session name (empty lets tmux pick a number).
@@ -176,7 +183,7 @@ Undo keeps the last 20 kills, most recent first, but only while lazymux is runni
 
 ## Projects
 
-**`N` (open project)** lists your project directories: zoxide's (most used first), then the git repositories under your project folders. Picking one switches to the session named after the directory (`~/project/lazy.mux` → `lazy_mux`), or creates that session in the directory first. Projects with a session are marked `● session <name>`.
+**`n` (open project; `N` on the Agents page, where `n` starts an agent)** lists your project directories: zoxide's (most used first), then the git repositories under your project folders. Picking one switches to the session named after the directory (`~/project/lazy.mux` → `lazy_mux`), or creates that session in the directory first. Projects with a session are marked `● session <name>`.
 
 ```tmux
 set -g @lazymux-project-roots '~/project,~/work'   # where git repos are searched (default: ~/project ~/projects ~/src ~/code ~/work ~/dev)
@@ -223,9 +230,9 @@ lazymux finds AI coding agents in every pane: **Claude Code, Codex, agy (Antigra
 
 | state | glyph | seen as |
 | --- | --- | --- |
-| **blocked** | `⣿` red | a permission prompt with a selected first option (`❯ 1. Yes`, `› 1. Yes, proceed`, `● 1. Allow once`); aider's `(Y)es/(N)o` question |
-| **working** | `⣾` yellow | `esc to interrupt` / `esc to cancel` in the status line (not in a menu that says `enter to select`), Claude Code's spinner line (`✽ Thinking… (12s · ↓ 1k tokens)`) or its spinning terminal title (`⠂ Fix JWT expiry`); for aider, a screen that changed in the last 3 seconds |
-| **done** | `●` green | neither (waiting for a prompt), and it finished while you were not looking at its window |
+| **blocked** | `◐` red | a permission prompt with a selected first option (`❯ 1. Yes`, `› 1. Yes, proceed`, `● 1. Allow once`); aider's `(Y)es/(N)o` question |
+| **working** | `●` yellow | `esc to interrupt` / `esc to cancel` in the status line (not in a menu that says `enter to select`), Claude Code's spinner line (`✽ Thinking… (12s · ↓ 1k tokens)`) or its spinning terminal title (`⠂ Fix JWT expiry`); for aider, a screen that changed in the last 3 seconds |
+| **done** | `✓` green | neither (waiting for a prompt), and it finished while you were not looking at its window |
 | **idle** | `○` dim | waiting for a prompt, and you have seen it: its window was on screen, or you selected it on the Agents page |
 
 **Done or idle** works like herdr: an agent that finishes in the window you are looking at becomes idle right away; one that finishes elsewhere stays done until you go to its window (or select it on the Agents page), so `●` always means "finished, not checked yet". The Done tab lists both.
@@ -258,27 +265,27 @@ A rule matches when all of its conditions hold: `contains` (every text, case-ins
 **The page** (`a`):
 
 ```
-╭─[1] All 4 │ Blocked 1 │ Working 2 │ Done 1 ─╮╭─ api:3.%12 · claude ──── ⣿ blocked 2m ─╮
-│ ▾ api                                    ⣿1 ││                                       │
-│ ⣿ claude 3:claude                blocked 2m ││   live screen of the selected agent   │
+╭─[1] All 4 │ Blocked 1 │ Working 2 │ Done 1 ─╮╭─ api:3.%12 · claude ──── ◐ blocked 2m ─╮
+│ ▾ api                                    ◐1 ││                                       │
+│ ◐ claude 3:claude                blocked 2m ││   live screen of the selected agent   │
 │   fix jwt expiry · waiting: Bash(go test…)  ││                                       │
 │                                             ││                                       │
-│ ▾ work                                   ⣾1 ││                                       │
-│ ⣾ codex 1:ai                     working 40s││                                       │
+│ ▾ work                                   ●1 ││                                       │
+│ ● codex 1:ai                     working 40s││                                       │
 │   add table tests for ui package            ││                                       │
 ╰────────────────────────────────── 1 of 2 ───╯│                                       │
 ╭─[2] Activity (claude@api:3) ─── 4 events ───╮│                                       │
 │ ▸ prompt  fix jwt expiry                    ││                                       │
 │   Read    internal/auth/jwt.go              ││                                       │
 │   Edit    internal/auth/jwt.go              ││                                       │
-│ ⣿ Bash    go test ./internal/auth/…  pending││                                       │
+│ ◐ Bash    go test ./internal/auth/…  pending││                                       │
 ╰─────────────────────────────────────────────╯╰───────────────────────────────────────╯
  1 yes · 2 always · 3 no · i reply · x interrupt  │ enter jump · [ ] tabs · tab panel · a tmux · ? help
 ```
 
 - **[1]** lists agents grouped by session, sessions with a blocked agent first. Each agent has two lines: glyph, program and window, state and time; then a dim summary (the last prompt, or the title Claude Code gives its terminal) and, when blocked, what it waits for. An agent without a summary shows its directory.
 - **Filter** `/`: type to narrow the list; it matches the program, session, window, state, summary, waiting reason and directory (`/go test` finds the agent waiting on `go test`). Folded sessions open while filtering. `enter` keeps the filter, `esc` clears it.
-- **Tabs** `[` / `]`: **All**, **Blocked**, **Working**, **Done**, each with a live count. The unfocused sidebar shows the totals in its header (`⣿1 ⣾2 ●1`).
+- **Tabs** `[` / `]`: **All**, **Blocked**, **Working**, **Done**, each with a live count. The sidebar shows the totals as chips in its first line (`◐1 ●2 ✓1`) and groups its agents by these states instead of tabs.
 - **Session headers** carry the worst state in the session. `enter` (or `space`) on a header folds or unfolds it.
 - **[2] Activity** is the timeline of the selected agent: prompts, tool calls (`Read`, `Edit`, `Bash`…) and `done` when a turn ends. The tool call a blocked agent waits on is tinted red and marked `pending`. It needs hooks (below); `j` / `k` scroll it when it is focused.
 - **Right side**: the agent's live pane.
@@ -297,7 +304,7 @@ A rule matches when all of its conditions hold: `contains` (every text, case-ins
 
 The keys sent per agent: Claude Code and agy get the digit, Gemini CLI too (its "no" is `esc`), Codex gets `y` / `a` / `esc`, opencode `enter` / `a` / `esc`, aider `y` / `a` / `n` and `enter`. Look at the preview before answering: the key goes straight to the agent.
 
-Killing a pane, window or session with an agent in it adds `⣿ ends agents: claude 3:claude (blocked)` to the confirm dialog.
+Killing a pane, window or session with an agent in it adds `◐ ends agents: claude 3:claude (blocked)` to the confirm dialog.
 
 **Hooks (optional).** Without hooks, lazymux knows the state but not the story. With them, each agent reports its prompts, tool calls and permission requests to lazymux as they happen:
 
@@ -323,10 +330,17 @@ lazymux's entries sit next to the hooks you (or other tools such as herdr) alrea
 
 While at least one sidebar (or plain `lazymux`) runs, lazymux watches for two changes:
 
-- an agent becomes **blocked**: `claude needs you` · `api:3 · Bash(go test ./...)`
-- an agent goes from working to **done**: `claude finished` · `api:3 · fix jwt expiry`
+- an agent becomes **blocked**: **Claude needs you**, then what it waits for (`Bash(go test ./...)`) and where it is (`api · 3:editor`)
+- an agent goes from working to **done**: **Claude finished · 2m 13s** (how long the turn took), then what it worked on (`fix jwt expiry`) and where
 
-The first time lazymux sees an agent it never notifies. A change waits `@lazymux-notify-delay` seconds (1) and is dropped if the state changes again before that, so a short flicker stays quiet. Only one lazymux per tmux server notifies: the sidebars agree through a lock file (`~/.cache/lazymux/leader-<server>.lock`), and when that one exits, another takes over within a second.
+The first time lazymux sees an agent it never notifies. A change waits `@lazymux-notify-delay` seconds (1) and is dropped if the state changes again before that, so a short flicker stays quiet.
+
+lazymux leaves out the notes you don't need:
+
+- **You are looking at it.** No note for an agent whose pane is the current pane of a client you typed into within the last 2 minutes. With `set -g focus-events on`, the client's terminal must also have focus, so you are notified when you switch to your browser. Its card still turns ✓ in the sidebar.
+- **You were just there.** No "finished" within 10 seconds of looking at the agent: you probably interrupted it with `esc` / `ctrl+c`, or just left it.
+- **Quick turns.** No "finished" for a turn shorter than `@lazymux-notify-min-work` seconds (10). A permission prompt in the middle does not start a new turn.
+- **One notification per agent.** A new desktop notification replaces the agent's last one instead of piling up, and a "needs you" notification is closed by itself once the prompt is answered (Linux). An agent's sound plays at most once every 5 seconds. Only one lazymux per tmux server notifies: the sidebars agree through a lock file (`~/.cache/lazymux/leader-<server>.lock`), and when that one exits, another takes over within a second.
 
 **Where notifications go** (`@lazymux-notify`, one or a comma list):
 
@@ -334,14 +348,14 @@ The first time lazymux sees an agent it never notifies. A change waits `@lazymux
 | --- | --- |
 | `system` (default) | a desktop notification (`notify-send` on Linux, `osascript` on macOS) |
 | `terminal` | a notification through your terminal: `OSC 9` for ghostty, iTerm2 and WezTerm, `OSC 99` for kitty, written to each attached client's terminal (no tmux passthrough needed; works over SSH) |
-| `tmux` | a message in the status line of every attached client, for 5 seconds |
+| `tmux` | a message in the status line of every attached client, for 5 seconds: `◐ Claude needs you  api · 3:editor · Bash(go test ./...)` with the title in red (green `✓` when finished) |
 | `off` | nothing |
 
 **Sounds** (`@lazymux-sound on|off`, default on): `@lazymux-sound-blocked` and `@lazymux-sound-done` are sound files (defaults: the freedesktop `message-new-instant` and `complete` sounds), played with the first of `paplay`, `pw-play`, `ffplay`, `mpv`, `afplay` that is installed. `LAZYMUX_NO_SOUND=1` silences them.
 
 `@lazymux-notify-on` picks the events (`blocked,done`). All options are read from tmux on every check, so `tmux set -g @lazymux-notify tmux` takes effect within a second. `lazymux notify test` sends a sample with your settings.
 
-**Status line.** `lazymux status` prints `⣿1 ⣾2 ●1` (blocked, working, done-but-unseen; zero counts left out, nothing at all when no agent needs a look) with tmux colors:
+**Status line.** `lazymux status` prints `◐1 ●2 ✓1` (blocked, working, done-but-unseen; zero counts left out, nothing at all when no agent needs a look) with tmux colors:
 
 ```tmux
 set -g status-right '#(lazymux status) │ %H:%M'
@@ -369,10 +383,12 @@ It reads the summary the notifying lazymux writes every second (`~/.cache/lazymu
 
 | subcommand | meaning |
 | --- | --- |
-| `lazymux sidebar toggle` | turn sidebars on / off (for the key binding) |
+| `lazymux sidebar cycle [session pane]` | the `prefix` + `b` key: open + focus the sidebar, focus it, or close it when you are in it |
+| `lazymux sidebar toggle` | turn sidebars on / off |
 | `lazymux sidebar off` | close all sidebars and remove the hooks |
 | `lazymux sidebar` | run the sidebar UI (started by the toggle inside the sidebar pane) |
 | `lazymux sidebar follow <session-id>` | dock the session's sidebar in its current window (run by the hook) |
+| `lazymux preview <sidebar-pane> <socket>` | the sidebar's preview popup (run by the sidebar in a `display-popup`) |
 | `lazymux hooks install \| uninstall \| status [agent…]` | add / remove lazymux in the hooks of Claude Code, Codex, agy, opencode |
 | `lazymux hook <agent> <event>` | record one hook event from stdin (run by the hooks) |
 | `lazymux status [--plain]` | agent counts for tmux's `status-right` |

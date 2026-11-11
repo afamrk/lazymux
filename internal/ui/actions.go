@@ -277,7 +277,7 @@ func (m *Model) killCmd() tea.Cmd {
 		}
 	}
 	if len(agents) > 0 {
-		body = append(body, "", stRed.Render("   ⣿ ends agents: "+strings.Join(agents, ", ")))
+		body = append(body, "", stRed.Render("   ◐ ends agents: "+strings.Join(agents, ", ")))
 	}
 	if r := running(all); len(r) > 0 {
 		body = append(body, "", stRed.Render("   running: "+strings.Join(r, ", ")))
@@ -388,13 +388,25 @@ func (m *Model) layoutCmd() tea.Cmd {
 	}
 }
 
-func (m *Model) openHelp() {
-	names := []string{"Sessions", "Windows", "Panes"}
-	ctx := names[m.focus]
-	if m.page == pageAgents {
-		ctx = "Agents"
+// helpCtx names what the keys act on: the sidebar's cursor row (Agent,
+// Session, Window, Pane), else the focused panel or Agents.
+func (m *Model) helpCtx() string {
+	if m.listMode() {
+		return m.listContext()
 	}
-	m.modal = newHelp(ctx, func(key string) tea.Cmd {
+	return helpContext(m.page, m.focus)
+}
+
+// helpContext names the help screen's context: the focused panel, or Agents.
+func helpContext(page, focus int) string {
+	if page == pageAgents {
+		return "Agents"
+	}
+	return []string{"Sessions", "Windows", "Panes"}[focus]
+}
+
+func (m *Model) openHelp() {
+	m.modal = newHelp(m.helpCtx(), func(key string) tea.Cmd {
 		return func() tea.Msg { return keyMsg(key) }
 	})
 }

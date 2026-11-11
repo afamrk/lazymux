@@ -4,6 +4,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseTree(t *testing.T) {
@@ -256,5 +257,71 @@ func TestSidebarToggleFollowOff(t *testing.T) {
 	}
 	if hooks, _ := c.Run("show-hooks", "-g"); strings.Contains(hooks, "["+hookIndex+"]") {
 		t.Errorf("hooks left behind: %s", hooks)
+	}
+}
+
+func TestPopupPlace(t *testing.T) {
+	// 191-column window, status line on top, 30-column sidebar 43 rows tall
+	g := popupPlace(0, 30, 1, 43, 191, 70, 70)
+	if g.x != 31 || g.w != 112 || g.h != 30 || g.y != 1+6+30 {
+		t.Errorf("default place = %+v", g)
+	}
+	if g := popupPlace(0, 30, 0, 43, 191, 100, 100); g.w != 160 || g.h != 43 || g.y != 43 {
+		t.Errorf("100%% place = %+v", g)
+	}
+	if g := popupPlace(0, 30, 0, 10, 50, 10, 10); g.w != 19 || g.h != 5 {
+		t.Errorf("small window place = %+v (width capped by the space, height at least 5)", g)
+	}
+	if percent("80%", 60) != 80 || percent("", 60) != 60 || percent("x", 60) != 60 || percent("0", 70) != 70 {
+		t.Errorf("percent parsing")
+	}
+}
+
+func TestParseWatched(t *testing.T) {
+	now := time.Unix(10000, 0)
+	out := "%1\tattached,focused,UTF-8\t9990\n%2\tattached,UTF-8\t9995\n%3\tattached,focused\t9000\n"
+	if got := parseWatched(out, true, now); !got["%1"] || got["%2"] || got["%3"] || len(got) != 1 {
+		t.Errorf("focus-events on: %v", got)
+	}
+	if got := parseWatched(out, false, now); !got["%1"] || !got["%2"] || got["%3"] {
+		t.Errorf("focus-events off: %v", got)
+	}
+}
+
+func TestSidebarCycle(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	sidebarCmdOverride = "sleep 600"
+	defer func() { sidebarCmdOverride = "" }()
+	c := &Client{Socket: "lazymux-test-cycle"}
+	c.Run("kill-server")
+	defer c.Run("kill-server")
+	out, err := c.Run("-f", "/dev/null", "new-session", "-d", "-s", "s", "-x", "120", "-y", "40", "-P", "-F", "#{session_id}\t#{pane_id}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid, work, _ := strings.Cut(out, "\t")
+	active := func() string { p, _ := c.Run("display-message", "-p", "-t", sid, "#{pane_id}"); return p }
+
+	if err := c.SidebarCycle(sid, work); err != nil { // off → open and move into it
+		t.Fatal(err)
+	}
+	side := c.sessionSidebar(sid)
+	if !c.SidebarsOn() || side == "" || active() != side {
+		t.Fatalf("first press should open the sidebar and focus it (sidebar %q, active %q)", side, active())
+	}
+	c.Run("select-pane", "-t", work)
+	if err := c.SidebarCycle(sid, work); err != nil { // open, elsewhere → move into it
+		t.Fatal(err)
+	}
+	if active() != side || c.sessionSidebar(sid) != side {
+		t.Fatalf("second press should focus the same sidebar (active %q)", active())
+	}
+	if err := c.SidebarCycle(sid, side); err != nil { // in it → close
+		t.Fatal(err)
+	}
+	if c.SidebarsOn() || c.sessionSidebar(sid) != "" {
+		t.Errorf("pressing it in the sidebar should close the sidebars")
 	}
 }
