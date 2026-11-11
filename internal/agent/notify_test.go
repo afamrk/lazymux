@@ -65,7 +65,7 @@ func TestNotifierTransitionsAndDelay(t *testing.T) {
 	r.wait(1500 * time.Millisecond)
 	got := r.obs(Blocked, "Bash(go test)")
 	if len(got) != 1 || got[0].Kind != NoteBlocked || got[0].Title != "Claude needs you" ||
-		got[0].Detail != "Bash(go test)" || got[0].Place != "work · 1:w1" {
+		got[0].Verb != "run" || got[0].Detail != "go test" || got[0].Place != "work › w1" {
 		t.Fatalf("blocked note: %+v", got)
 	}
 	// answered: the "needs you" note is closed; then a flicker to idle is cancelled
@@ -83,7 +83,7 @@ func TestNotifierTransitionsAndDelay(t *testing.T) {
 	r.wait(20 * time.Second)
 	r.obs(Idle, "")
 	r.wait(2 * time.Second)
-	if got := r.obs(Idle, ""); len(got) != 1 || got[0].Kind != NoteDone || got[0].Title != "Claude finished · 23s" || got[0].Detail != "fix jwt" {
+	if got := r.obs(Idle, ""); len(got) != 1 || got[0].Kind != NoteDone || got[0].Title != "Claude finished · 23s" || got[0].Detail != "Fix jwt" {
 		t.Errorf("done note: %+v", got)
 	}
 	r.cfg.On = map[NoteKind]bool{NoteBlocked: true}
@@ -216,5 +216,72 @@ func TestStatusFormatAndLeader(t *testing.T) {
 	}
 	if _, err := os.Stat(statusFile("srv")); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestDescribeWaiting(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	for _, c := range []struct{ in, verb, what string }{
+		{"Bash(go test ./...)", "run", "go test ./..."},
+		{"Bash command: go test ./...", "run", "go test ./..."},
+		{"Edit(/src/api/app.go)", "edit", "app.go"},
+		{"Edit file: /src/api/app.go", "edit", "app.go"},
+		{"Write(" + home + "/notes/x.md)", "edit", "~/notes/x.md"},
+		{"WebFetch(https://example.com/docs/)", "fetch", "example.com/docs"},
+		{"run_shell_command(ls)", "run", "ls"},
+		{"mcp__github__create_issue(title)", "use", "github create_issue"},
+		{"Glob(*.go)", "use", "Glob *.go"},
+		{"Which database should I use?", "asks", "Which database should I use?"},
+		{"Note: something odd", "", "Note: something odd"},
+	} {
+		if v, w := describeWaiting(c.in, "/src/api"); v != c.verb || w != c.what {
+			t.Errorf("describeWaiting(%q) = %q, %q; want %q, %q", c.in, v, w, c.verb, c.what)
+		}
+	}
+	if h := humanize("sidebar-preview-popup"); h != "Sidebar preview popup" {
+		t.Errorf("humanize slug: %q", h)
+	}
+	if h := humanize("fix JWT expiry"); h != "Fix JWT expiry" {
+		t.Errorf("humanize text: %q", h)
+	}
+}
+
+func TestNotePlace(t *testing.T) {
+	tree, _ := tmux.ParseTree(row("%1", "claude", "x"))
+	p := tree.Sessions[0].Windows[0].Panes[0]
+	if got := notePlace(Claude, p); got != "work › w1" {
+		t.Errorf("place: %q", got)
+	}
+	p.Window.Name = "claude"
+	if got := notePlace(Claude, p); got != "work" {
+		t.Errorf("a window named after the agent should be left out: %q", got)
+	}
+}
+
+func TestDesktopStyles(t *testing.T) {
+	if styleFor("('dunst', 'knopwob', '1.9.2', '1.2')", "(['actions', 'body', 'body-markup'],)") != styleDunst ||
+		styleFor("('gnome-shell', 'GNOME', '46', '1.2')", "(['body', 'body-markup'],)") != styleBold ||
+		styleFor("('x', 'y', '1', '1.2')", "(['body'],)") != stylePlain || styleFor("", "") != stylePlain {
+		t.Errorf("styleFor")
+	}
+	n := Note{Kind: NoteBlocked, Title: "Claude needs you", Place: "api › editor", Verb: "run", Detail: "a < b && c"}
+	if b := n.markupBody(stylePlain); b != "api › editor\nrun  a < b && c" {
+		t.Errorf("plain: %q", b)
+	}
+	if b := n.markupBody(styleBold); b != "<b>api › editor</b>\nrun  a &lt; b &amp;&amp; c" {
+		t.Errorf("bold: %q", b)
+	}
+	if b := n.markupBody(styleDunst); !strings.Contains(b, `<span color="#f9e2af">run</span>  a &lt; b`) || !strings.Contains(b, "<b>api ") {
+		t.Errorf("dunst: %q", b)
+	}
+	args := strings.Join(desktopArgs(n, styleDunst), " ")
+	if !strings.Contains(args, "string:frcolor:#f38ba8") || !strings.Contains(args, "-a lazymux") {
+		t.Errorf("dunst args: %s", args)
+	}
+	if strings.Contains(strings.Join(desktopArgs(n, styleBold), " "), "bgcolor") {
+		t.Errorf("only dunst gets color hints")
+	}
+	if n.Text() != "api › editor · run a < b && c" {
+		t.Errorf("one line: %q", n.Text())
 	}
 }

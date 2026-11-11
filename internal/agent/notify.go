@@ -44,24 +44,33 @@ type Note struct {
 	Kind   NoteKind
 	Pane   string
 	Title  string // "Claude needs you", "Claude finished · 2m 13s"
-	Detail string // what it waits for, or what it worked on
-	Place  string // "api · 3:editor"
+	Place  string // "api › editor"
+	Verb   string // what it wants to do: "run", "edit", "asks" ("" when unknown)
+	Detail string // its target ("go test ./..."), or what it worked on
 }
 
-// Body is the notification text: the detail over the place.
+// what is the verb and its target: "run  go test ./...".
+func (n Note) what() string {
+	if n.Verb == "" {
+		return n.Detail
+	}
+	return n.Verb + "  " + n.Detail
+}
+
+// Body is the plain notification text: the place over what it is about.
 func (n Note) Body() string {
 	if n.Detail == "" {
 		return n.Place
 	}
-	return n.Detail + "\n" + n.Place
+	return n.Place + "\n" + n.what()
 }
 
-// Text is the body on one line: the place, then the detail.
+// Text is the body on one line (terminal and tmux messages).
 func (n Note) Text() string {
 	if n.Detail == "" {
 		return n.Place
 	}
-	return n.Place + " · " + n.Detail
+	return n.Place + " · " + strings.Replace(n.what(), "  ", " ", 1)
 }
 
 // Config is read from tmux global options (set them in tmux.conf):
@@ -290,14 +299,13 @@ func DisplayName(k Kind) string {
 }
 
 func noteFor(kind NoteKind, a *Agent, p *tmux.Pane, worked time.Duration) Note {
-	nt := Note{Kind: kind, Pane: a.Pane,
-		Place: fmt.Sprintf("%s · %d:%s", p.Window.Session.Name, p.Window.Index, p.Window.Name)}
+	nt := Note{Kind: kind, Pane: a.Pane, Place: notePlace(a.Kind, p)}
 	if kind == NoteBlocked {
-		nt.Title, nt.Detail = DisplayName(a.Kind)+" needs you", a.Waiting
+		nt.Title = DisplayName(a.Kind) + " needs you"
+		nt.Verb, nt.Detail = describeWaiting(a.Waiting, p.Path)
 	} else {
-		nt.Title, nt.Detail = DisplayName(a.Kind)+" finished · "+Duration(worked), a.Summary
+		nt.Title, nt.Detail = DisplayName(a.Kind)+" finished · "+Duration(worked), humanize(a.Summary)
 	}
-	nt.Detail = clip(nt.Detail, 100)
 	return nt
 }
 
@@ -392,18 +400,14 @@ func systemNotify(n Note) {
 		_ = exec.Command("osascript", "-e", script).Run()
 		return
 	}
-	icon := "emblem-ok-symbolic"
-	if n.Kind == NoteBlocked {
-		icon = "dialog-question"
-	}
-	args := []string{"-a", "lazymux", "-i", icon, "-p"}
+	args := []string{"-p"}
 	delivered.Lock()
 	old := delivered.id[n.Pane]
 	delivered.Unlock()
 	if old != "" {
 		args = append(args, "-r", old) // one notification per agent
 	}
-	out, err := exec.Command("notify-send", append(args, n.Title, n.Body())...).Output()
+	out, err := exec.Command("notify-send", append(args, desktopArgs(n, serverStyle())...)...).Output()
 	if id := strings.TrimSpace(string(out)); err == nil && id != "" && n.Pane != "" {
 		delivered.Lock()
 		delivered.id[n.Pane] = id

@@ -70,8 +70,11 @@ func main() {
 			cfg := agent.LoadConfig(c)
 			fmt.Printf("delivery %v, notify on %v, delay %v, min work %v, sound %v\n",
 				cfg.Delivery, cfg.On, cfg.Delay, cfg.MinWork, cfg.Sound)
-			agent.DeliverSync(c, cfg, agent.Note{Kind: agent.NoteBlocked, Title: "Claude needs you",
-				Detail: "Bash(go test ./...)", Place: "api · 3:editor  (lazymux notify test)"})
+			// two samples, on two panes so the second does not replace the first
+			agent.DeliverSync(c, cfg, agent.Note{Kind: agent.NoteBlocked, Pane: "test-blocked",
+				Title: "Claude needs you", Place: "api › editor", Verb: "run", Detail: "go test ./..."})
+			agent.DeliverSync(c, cfg, agent.Note{Kind: agent.NoteDone, Pane: "test-done",
+				Title: "Claude finished · 2m 13s", Place: "lazymux", Detail: "Sidebar preview popup"})
 			return
 		}
 	}

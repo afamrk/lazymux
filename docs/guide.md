@@ -330,8 +330,10 @@ lazymux's entries sit next to the hooks you (or other tools such as herdr) alrea
 
 While at least one sidebar (or plain `lazymux`) runs, lazymux watches for two changes:
 
-- an agent becomes **blocked**: **Claude needs you**, then what it waits for (`Bash(go test ./...)`) and where it is (`api · 3:editor`)
-- an agent goes from working to **done**: **Claude finished · 2m 13s** (how long the turn took), then what it worked on (`fix jwt expiry`) and where
+- an agent becomes **blocked**: **Claude needs you**, then where it is (`api › editor`: session › window, the window left out when it is only named after the agent) and what it wants in plain words (`run  go test ./...`, `edit  app.go`, `fetch  example.com/docs`, `asks  Which database?`; paths relative to the agent's directory or `~`)
+- an agent goes from working to **done**: **Claude finished · 2m 13s** (how long the turn took), then where and what it worked on (the prompt you typed with hooks, else the terminal title, a slug like `fix-jwt-expiry` written as `Fix jwt expiry`)
+
+Desktop notifications carry lazymux's own icons (a red `?`, a green `✓`). lazymux asks the notification server once what it supports: **dunst** gets a dark card with a red or green border and colored text (hints only dunst reads), other servers with markup (GNOME, KDE…) get the place in bold, the rest plain text. Nothing needs to be configured for any of them.
 
 The first time lazymux sees an agent it never notifies. A change waits `@lazymux-notify-delay` seconds (1) and is dropped if the state changes again before that, so a short flicker stays quiet.
 

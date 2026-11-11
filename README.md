@@ -124,7 +124,7 @@ Detection rules are data in [herdr's manifest format](https://github.com/herdrde
 
 ### Status line and notifications
 
-While a sidebar runs, lazymux tells you when an agent needs you (**Claude needs you** · `Bash(go test…)` · `api · 3:editor`) or finishes (**Claude finished · 2m 13s**), with a desktop notification and a sound. It stays quiet about the agent you are looking at, about turns shorter than 10 seconds and right after you interrupt one, and keeps one notification per agent, closing a "needs you" once it is answered. Put the counts in your tmux status line too:
+While a sidebar runs, lazymux tells you when an agent needs you (**Claude needs you** · `api › editor` · `run  go test ./...`) or finishes (**Claude finished · 2m 13s**), with a desktop notification and a sound. It stays quiet about the agent you are looking at, about turns shorter than 10 seconds and right after you interrupt one, and keeps one notification per agent, closing a "needs you" once it is answered. Put the counts in your tmux status line too:
 
 ```tmux
 set -g status-right '#(lazymux status) │ %H:%M'
