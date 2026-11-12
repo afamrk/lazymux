@@ -1,7 +1,7 @@
 # lazymux detection rules for Claude Code (format: see internal/agent/rules.go).
 # Copy to ~/.config/lazymux/agent-detection/claude.toml to change them.
 id = "claude"
-version = "2026.11.08.1"
+version = "2026.11.12.1"
 min_engine_version = 1
 aliases = ["claude-code"]
 
@@ -70,6 +70,17 @@ not = [
   { contains = ["enter to confirm"] },
   { contains = ["enter to set as default"] },
 ]
+
+[[rules]]
+id = "background_agent"
+state = "working"
+priority = 500
+region = "after_last_horizontal_rule"
+visible_working = true
+# the main turn has ended (idle title) but a subagent still runs: Claude
+# lists it under the prompt box with its run time and tokens
+# "◯ Explore  Investigate window-close focus bug   20s · ↓ 31.6k tokens"
+line_regex = ['^\s*\S\s+\S+\s{2,}\S.*\s\d+[smh](\s+\d+[smh])*\s*·\s*[↓↑]\s*[\d.]+[kKmM]?\s+tokens\s*$']
 
 [[rules]]
 id = "transcript_viewer"

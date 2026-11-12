@@ -35,6 +35,17 @@ const claudeIdle = `  Summary
   📁 lazymux 🌿 master | Opus 5.5·medium | 🧠 7% | 📅 34%
   -- INSERT -- ⏵⏵ auto mode on (shift+tab to cycle)`
 
+// the main turn has ended but a subagent still runs (listed under the prompt)
+const claudeBackgroundAgent = `● Explore(Investigate window-close focus bug)
+  ⎿  Backgrounded agent (↓ to manage · ctrl+o to expand)
+────────────────────────────────────────────────
+❯ ok, waiting
+────────────────────────────────────────────────
+  📁 lazymux 🌿 main | Opus 5.5·medium | 🧠 6% | 5h 47% (0h25m) | 📅 26%
+  -- INSERT -- ⏵⏵ auto mode on · 1 shell
+  ● main
+  ◯ Explore  Investigate window-close focus bug        1m 20s · ↓ 31.6k tokens`
+
 const claudeWorking = `⏺ Reading the files.
 
 ✽ Philosophizing… (1m 29s · ↓ 5.6k tokens)
@@ -76,6 +87,7 @@ func TestClassify(t *testing.T) {
 		{"claude idle title", Claude, claudeIdle, "✳ Fix JWT expiry", Idle, "", true},
 		{"blocked beats a spinning title", Claude, claudeBlocked, "⠂ Fix JWT expiry", Blocked, "Bash command: go test ./internal/auth/...", true},
 		{"claude question form", Claude, claudeQuestion, "✳ Input option", Blocked, "Which option do you pick: One, Two, or Three?", true},
+		{"claude idle with a running subagent", Claude, claudeBackgroundAgent, "✳ Subagent status", Working, "", true},
 		{"a menu's esc to cancel is not working", Claude, "Select model\n❯ Opus\n  Sonnet\nEnter to select · Esc to cancel\n", "", Idle, "", false},
 		{"claude /usage dialog is idle", Claude, "   Settings  Status   Config   Usage   Stats\n   Current week (all models)\n   ███▌    39% used\n   Resets Nov 9, 5:30pm\n   d to day · w to week\n   Esc to cancel\n", "✳ Claude Code", Idle, "", true},
 		{"codex working", Codex, "• Explaining\n\n• Working (12s • esc to interrupt)\n▌ \n", "", Working, "", true},
