@@ -61,6 +61,10 @@ func (m *Model) checkFocus() tea.Cmd {
 		if err != nil {
 			return nil
 		}
+		if st.Alone { // you closed the pane next to it: let tmux go to the next window
+			c.SidebarReap()
+			return focusMsg{focused: false, paneW: st.PaneW, winW: st.WinW, session: st.Session}
+		}
 		if !st.Docked && st.Session != "" { // a layout change moved it: put it back
 			c.SidebarFollow(st.Session)
 		}

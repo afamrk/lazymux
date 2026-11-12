@@ -18,28 +18,39 @@ const (
 	hookIndex    = "90" // fixed hook slot, so user hooks are left alone
 )
 
-var sidebarHooks = []string{"session-window-changed", "client-session-changed"}
+// sidebarHooks are the global hooks lazymux sets while sidebars are on, with
+// the lazymux arguments each runs: a window or session change moves the
+// sidebar along, a closed pane may leave it alone in its window.
+var sidebarHooks = []struct{ name, args string }{
+	{"session-window-changed", "sidebar follow '#{session_id}'"},
+	{"client-session-changed", "sidebar follow '#{session_id}'"},
+	{"pane-exited", "sidebar reap"},
+	{"after-kill-pane", "sidebar reap"},
+}
 
 // sidebarRef is one sidebar pane found on the server.
 type sidebarRef struct {
 	pane, window, session string // session = the one it serves (option value)
 	left, height, winH    int
+	winPanes              int // panes in its window (1: the sidebar is alone)
 }
 
 func (c *Client) sidebars() ([]sidebarRef, error) {
 	out, err := c.Run("list-panes", "-a", "-F",
-		"#{pane_id}\t#{window_id}\t#{"+SidebarOpt+"}\t#{pane_left}\t#{pane_height}\t#{window_height}")
+		"#{pane_id}\t#{window_id}\t#{"+SidebarOpt+"}\t#{pane_left}\t#{pane_height}\t#{window_height}\t#{window_panes}")
 	if err != nil {
 		return nil, err
 	}
 	var refs []sidebarRef
+	seen := map[string]bool{} // linked windows list a pane twice
 	for _, l := range strings.Split(out, "\n") {
 		f := strings.Split(l, "\t")
-		if len(f) != 6 || f[2] == "" {
+		if len(f) != 7 || f[2] == "" || seen[f[0]] {
 			continue
 		}
+		seen[f[0]] = true
 		refs = append(refs, sidebarRef{pane: f[0], window: f[1], session: f[2],
-			left: atoi(f[3]), height: atoi(f[4]), winH: atoi(f[5])})
+			left: atoi(f[3]), height: atoi(f[4]), winH: atoi(f[5]), winPanes: atoi(f[6])})
 	}
 	return refs, nil
 }
@@ -82,9 +93,9 @@ func (c *Client) SidebarToggle() error {
 	if _, err := c.Run("set-option", "-g", sidebarOnOpt, "1"); err != nil {
 		return err
 	}
-	follow := c.sidebarCommand("sidebar", "follow", "'#{session_id}'")
 	for _, h := range sidebarHooks {
-		if _, err := c.Run("set-hook", "-g", h+"["+hookIndex+"]", `run-shell -b "`+follow+`"`); err != nil {
+		cmd := c.sidebarCommand(h.args)
+		if _, err := c.Run("set-hook", "-g", h.name+"["+hookIndex+"]", `run-shell -b "`+cmd+`"`); err != nil {
 			return err
 		}
 	}
@@ -141,7 +152,7 @@ func (c *Client) sessionSidebar(session string) string {
 func (c *Client) SidebarOff() error {
 	c.Run("set-option", "-gu", sidebarOnOpt)
 	for _, h := range sidebarHooks {
-		c.Run("set-hook", "-gu", h+"["+hookIndex+"]")
+		c.Run("set-hook", "-gu", h.name+"["+hookIndex+"]")
 	}
 	refs, err := c.sidebars()
 	if err != nil {
@@ -199,6 +210,51 @@ func (c *Client) SidebarFollow(session string) error {
 	return err
 }
 
+// SidebarReap gets sidebars out of the way that were left alone in their
+// window (you closed the last pane next to one). Plain tmux would close that
+// window and pick the next one, so the sidebar moves to another window of its
+// session: the emptied window is destroyed, tmux selects the next window by
+// its own rules, and the sidebar docks there. In the session's only window
+// the sidebar is closed, so the session ends as it would without it.
+func (c *Client) SidebarReap() error {
+	refs, err := c.sidebars()
+	if err != nil {
+		return err
+	}
+	for _, r := range refs {
+		if r.winPanes != 1 {
+			continue
+		}
+		other := c.otherWindow(r.session, r.window)
+		if other == "" {
+			c.Run("kill-pane", "-t", r.pane)
+			continue
+		}
+		if _, err := c.Run("join-pane", "-d", "-s", r.pane, "-t", other); err != nil {
+			c.Run("kill-pane", "-t", r.pane) // the follow hook opens a new one
+			continue
+		}
+		if err := c.SidebarFollow(r.session); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// otherWindow is a window of session other than win, or "".
+func (c *Client) otherWindow(session, win string) string {
+	out, err := c.Run("list-windows", "-t", session, "-F", "#{window_id}")
+	if err != nil {
+		return ""
+	}
+	for _, w := range strings.Split(out, "\n") {
+		if w != "" && w != win {
+			return w
+		}
+	}
+	return ""
+}
+
 // ResizeWidth sets a pane's width in columns.
 func (c *Client) ResizeWidth(pane string, cols int) error {
 	_, err := c.Run("resize-pane", "-t", pane, "-x", strconv.Itoa(cols))
@@ -211,23 +267,24 @@ type SidebarPaneState struct {
 	Focused     bool   // active pane of the active window of an attached session
 	Docked      bool   // full height on the left edge
 	Session     string // session it serves
+	Alone       bool   // the only pane of its window (the pane next to it closed)
 }
 
 // SidebarState queries the sidebar pane's size, focus and placement.
 func (c *Client) SidebarState(pane string) (SidebarPaneState, error) {
 	out, err := c.Run("display-message", "-p", "-t", pane,
 		"#{pane_width}\t#{window_width}\t#{pane_active}#{window_active}#{?session_attached,1,0}"+
-			"\t#{pane_left}\t#{pane_height}\t#{window_height}\t#{"+SidebarOpt+"}")
+			"\t#{pane_left}\t#{pane_height}\t#{window_height}\t#{"+SidebarOpt+"}\t#{window_panes}")
 	if err != nil {
 		return SidebarPaneState{}, err
 	}
 	f := strings.Split(out, "\t")
-	if len(f) != 7 {
+	if len(f) != 8 {
 		return SidebarPaneState{}, fmt.Errorf("unexpected display-message output %q", out)
 	}
 	return SidebarPaneState{
 		PaneW: atoi(f[0]), WinW: atoi(f[1]), Focused: f[2] == "111",
-		Docked: f[3] == "0" && f[4] == f[5], Session: f[6],
+		Docked: f[3] == "0" && f[4] == f[5], Session: f[6], Alone: f[7] == "1",
 	}, nil
 }
 

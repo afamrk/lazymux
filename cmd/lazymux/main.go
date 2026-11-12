@@ -96,7 +96,7 @@ func main() {
 	}
 }
 
-// sidebar handles `lazymux sidebar [toggle|cycle|follow <session>|off]`. Without a
+// sidebar handles `lazymux sidebar [toggle|cycle|follow <session>|reap|off]`. Without a
 // subcommand it runs the UI inside the sidebar pane.
 func sidebar(c *tmux.Client, args []string) {
 	var err error
@@ -122,8 +122,10 @@ func sidebar(c *tmux.Client, args []string) {
 		err = c.SidebarOff()
 	case args[0] == "follow" && len(args) == 2:
 		err = c.SidebarFollow(args[1])
+	case args[0] == "reap": // a closed pane left a sidebar alone in its window
+		err = c.SidebarReap()
 	default:
-		err = fmt.Errorf("usage: lazymux sidebar [toggle | cycle [<session-id> <pane-id>] | off | follow <session-id>]")
+		err = fmt.Errorf("usage: lazymux sidebar [toggle | cycle [<session-id> <pane-id>] | off | follow <session-id> | reap]")
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "lazymux:", err)

@@ -260,6 +260,96 @@ func TestSidebarToggleFollowOff(t *testing.T) {
 	}
 }
 
+// TestSidebarReap: closing the last pane next to the sidebar closes the
+// window and moves to the next one, as in plain tmux; in the session's only
+// window it ends the session.
+func TestSidebarReap(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	sidebarCmdOverride = "sleep 600"
+	defer func() { sidebarCmdOverride = "" }()
+	c := &Client{Socket: "lazymux-test-reap"}
+	c.Run("kill-server")
+	defer c.Run("kill-server")
+	sid, err := c.Run("-f", "/dev/null", "new-session", "-d", "-s", "s", "-x", "120", "-y", "40", "-P", "-F", "#{session_id}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	solo, err := c.Run("new-session", "-d", "-s", "solo", "-x", "120", "-y", "40", "-P", "-F", "#{session_id}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := c.NewWindow(sid, "two", "/tmp"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := c.NewWindow(sid, "three", "/tmp"); err != nil {
+		t.Fatal(err)
+	}
+	c.Run("select-window", "-t", sid+":1") // the middle window is current
+	w2, _ := c.Run("display-message", "-p", "-t", sid, "#{window_id}")
+	if err := c.SidebarToggle(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SidebarFollow(solo); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.SidebarReap(); err != nil { // nothing alone yet: no-op
+		t.Fatal(err)
+	}
+	if refs, _ := c.sidebars(); len(refs) != 2 {
+		t.Fatalf("sidebars after a no-op reap = %d, want 2", len(refs))
+	}
+
+	user, _ := c.Run("display-message", "-p", "-t", sid, "#{pane_id}")
+	if strings.TrimSpace(user) == c.sessionSidebar(sid) {
+		t.Fatal("the sidebar must not be the active pane")
+	}
+	c.Run("kill-pane", "-t", user) // you close the middle window's shell
+	if err := c.SidebarReap(); err != nil {
+		t.Fatal(err)
+	}
+	if out, _ := c.Run("list-windows", "-t", sid, "-F", "#{window_id}"); strings.Contains(out, w2) {
+		t.Errorf("window %s still open: %q", w2, out)
+	}
+	cur, _ := c.Run("display-message", "-p", "-t", sid, "#{window_id}\t#{pane_id}")
+	curWin, active, _ := strings.Cut(cur, "\t")
+	if curWin == w2 || curWin == "" {
+		t.Errorf("current window = %q, want another one", curWin)
+	}
+	if active == c.sessionSidebar(sid) {
+		t.Errorf("focus went to the sidebar")
+	}
+	var mine []sidebarRef
+	refs, _ := c.sidebars()
+	for _, r := range refs {
+		if r.session == sid {
+			mine = append(mine, r)
+		}
+	}
+	if len(mine) != 1 || mine[0].window != curWin || mine[0].left != 0 {
+		t.Errorf("sidebar after reap = %+v, want one docked in %s", mine, curWin)
+	}
+
+	// the only window of a session: closing its shell ends the session
+	soloPane, _ := c.Run("list-panes", "-t", solo, "-F", "#{pane_id}\t#{"+SidebarOpt+"}")
+	for _, l := range strings.Split(soloPane, "\n") {
+		if p, opt, _ := strings.Cut(l, "\t"); opt == "" {
+			c.Run("kill-pane", "-t", p)
+		}
+	}
+	if err := c.SidebarReap(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Run("has-session", "-t", solo); err == nil {
+		t.Errorf("session %s still exists", solo)
+	}
+	if _, err := c.Run("has-session", "-t", sid); err != nil {
+		t.Errorf("session %s is gone: %v", sid, err)
+	}
+}
+
 func TestPopupPlace(t *testing.T) {
 	// 191-column window, status line on top, 30-column sidebar 43 rows tall
 	g := popupPlace(0, 30, 1, 43, 191, 70, 70)

@@ -111,12 +111,16 @@ Before a kill, `SnapSession` / `SnapWindow` / `SnapPane` record names, the windo
 
 `lazymux sidebar cycle <session> <pane>` (the `prefix` + `b` binding) turns sidebars on if needed, then selects the session's sidebar pane, or turns them off when `<pane>` is that sidebar. While the sidebar is focused the popup has all keys, so the popup reads `prefix` / `prefix2`; on the prefix it waits for the next key, sends both to the sidebar (`prefix` wire message) and exits; when `display-popup` returns, the sidebar runs `send-keys -K -c <client>` with them (tmux looks them up in the client's key table, so the binding runs) and checks focus 300 ms later to reopen the popup if you are still in the sidebar.
 
-`lazymux sidebar toggle` sets the global user option `@lazymux_sidebar_on` and installs two hooks in slot `[90]` (user hooks are left alone):
+`lazymux sidebar toggle` sets the global user option `@lazymux_sidebar_on` and installs four hooks in slot `[90]` (user hooks are left alone):
 
 ```
 session-window-changed[90]  run-shell -b "lazymux sidebar follow '#{session_id}'"
 client-session-changed[90]  run-shell -b "lazymux sidebar follow '#{session_id}'"
+pane-exited[90]             run-shell -b "lazymux sidebar reap"
+after-kill-pane[90]         run-shell -b "lazymux sidebar reap"
 ```
+
+`SidebarReap` handles a sidebar left alone in its window (you exited or killed the last pane next to it). Without it the window would stay open with only the sidebar, and the sidebar would take focus. With other windows in the session it `join-pane -d`s the sidebar into one of them, so tmux destroys the empty window and selects the next one by its own rules, and then `SidebarFollow` docks it there. In the session's only window it kills the sidebar, so the session ends (and `detach-on-destroy` applies) as in plain tmux. `checkFocus` reaps too (`SidebarState.Alone`), for hooks installed by an older lazymux.
 
 `SidebarFollow(session)` keeps exactly one sidebar per session docked in the session's current window. It creates one with `split-window -hbfd -l 30` (and marks it with the pane option `@lazymux_sidebar=<session id>`), moves it with `join-pane -hbfd -l 30`, or re-docks it (`break-pane` + `join-pane`) when it is no longer full height at the left edge. The pane keeps running while it moves, so cursor, undo stack and page survive.
 
