@@ -475,3 +475,13 @@ func TestBundledRules(t *testing.T) {
 		}
 	}
 }
+
+func TestAnswerKeysNoIsEscForClaude(t *testing.T) {
+	// "3" in Claude Code 2.1 is "Yes, and switch to auto mode": no must never be a digit
+	if got := AnswerKeys(Claude, 3); len(got) != 1 || got[0] != "Escape" {
+		t.Errorf("claude no = %v, want Escape", got)
+	}
+	if got := AnswerKeys(Claude, 1); got[0] != "1" {
+		t.Errorf("claude yes = %v, want 1", got)
+	}
+}

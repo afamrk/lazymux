@@ -183,6 +183,19 @@ func (m *Model) panelRefs() []selRef {
 			out = append(out, selRef{panelPanes, s.ID, x.ID, "pane " + x.ID})
 		}
 	}
+	if m.listMode() { // the sidebar list: only the rows it shows (its / filter)
+		shown := map[string]bool{}
+		for _, r := range m.listRows() {
+			shown[rowID(r)] = r.kind != rowHeading && r.kind != rowAgent
+		}
+		keep := out[:0]
+		for _, x := range out {
+			if shown[x.id] {
+				keep = append(keep, x)
+			}
+		}
+		out = keep
+	}
 	return out
 }
 

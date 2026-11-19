@@ -642,6 +642,23 @@ func (m *Model) viewToast() string {
 	if m.toast.isErr {
 		color, st = cRed, stRed
 	}
+	if m.sidebar { // narrow: wrap (up to 3 lines) instead of cutting off "u to undo"
+		tw := max(10, m.w-6)
+		var lines []string
+		w := 0
+		for i, l := range strings.Split(ansi.Wordwrap(m.toast.text, tw, ""), "\n") {
+			if i == 3 {
+				break
+			}
+			l = ansi.Truncate(l, tw, "…")
+			w = max(w, ansi.StringWidth(l))
+			lines = append(lines, l)
+		}
+		for i, l := range lines {
+			lines[i] = " " + st.Render(l) + strings.Repeat(" ", w-ansi.StringWidth(l)) + " "
+		}
+		return renderFrame("", "", false, lines, w+4, len(lines)+2, color)
+	}
 	text := ansi.Truncate(m.toast.text, max(10, m.w/2), "…")
 	w := ansi.StringWidth(text) + 4
 	return renderFrame("", "", false, []string{" " + st.Render(text) + " "}, w, 3, color)

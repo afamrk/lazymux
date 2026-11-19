@@ -175,8 +175,33 @@ func (c *Client) JoinPane(srcPaneID, dstTarget string) error {
 	return err
 }
 
+// SwapWindows swaps two windows and keeps each session on the window it was
+// showing: tmux 3.4's swap-window -d selects the destination index anyway,
+// which moved you (and left the sidebar behind) even when you were on
+// neither window. A window that moved to the other session is replaced by
+// what is now at its index. One tmux command, so no session shows another
+// window in between (its sidebar would see itself lose focus).
 func (c *Client) SwapWindows(aSess, aWin, bSess, bWin string) error {
-	_, err := c.Run("swap-window", "-d", "-s", aSess+":"+aWin, "-t", bSess+":"+bWin)
+	args := []string{"swap-window", "-d", "-s", aSess + ":" + aWin, "-t", bSess + ":" + bWin}
+	keep := func(sess, gone string) {
+		out, err := c.Run("display-message", "-p", "-t", sess, "#{window_id} #{window_index}")
+		if err != nil {
+			return
+		}
+		win, idx, _ := strings.Cut(out, " ")
+		target := sess + ":" + win
+		if win == gone { // it went to the other session
+			target = sess + ":" + idx
+		}
+		args = append(args, ";", "select-window", "-t", target)
+	}
+	if aSess == bSess {
+		keep(aSess, "")
+	} else {
+		keep(aSess, aWin)
+		keep(bSess, bWin)
+	}
+	_, err := c.Run(args...)
 	return err
 }
 

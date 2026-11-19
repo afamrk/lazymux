@@ -380,7 +380,7 @@ func (m *Model) handleListKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		switch {
 		case m.listFilter != "":
-			m.listFilter = ""
+			m.clearListFilter()
 			return m, m.listSync()
 		case len(m.selected) > 0:
 			m.selected = nil
@@ -454,7 +454,8 @@ func (m *Model) listFilterKey(k tea.KeyMsg) tea.Cmd {
 		m.filtering = false
 		return m.listSync()
 	case "esc":
-		m.filtering, m.listFilter = false, ""
+		m.filtering = false
+		m.clearListFilter()
 		return m.listSync()
 	case "down":
 		return m.listMove(1)
@@ -464,9 +465,46 @@ func (m *Model) listFilterKey(k tea.KeyMsg) tea.Cmd {
 	var cmd tea.Cmd
 	m.filterIn, cmd = m.filterIn.Update(k)
 	m.listFilter = strings.TrimSpace(m.filterIn.Value())
-	m.listSel = "" // the first match
-	m.listIdx = 0
+	m.listSel, m.listIdx = m.firstMatch(), 0
 	return tea.Batch(cmd, m.listSync())
+}
+
+// clearListFilter drops the filter and keeps the cursor on the row it was on:
+// the filter showed it unfolded, so its session and window open.
+func (m *Model) clearListFilter() {
+	rows := m.listRows()
+	if i := m.listCursor(rows); i >= 0 {
+		switch r := rows[i]; r.kind {
+		case rowWindow:
+			m.setOpen(sessKey(r.sess), true)
+		case rowPane:
+			m.setOpen(sessKey(r.sess), true)
+			m.setOpen(winKey(r.win), true)
+		}
+		m.listSel = rows[i].key
+	}
+	m.listFilter = ""
+}
+
+// firstMatch is the key of the first row that matches the filter itself, not
+// only as the parent of a match ("" for the first row).
+func (m *Model) firstMatch() string {
+	q := m.listFilter
+	for _, r := range m.listRows() {
+		var ok bool
+		switch r.kind {
+		case rowAgent, rowPane: // listed only when they match
+			ok = true
+		case rowSession:
+			ok, _ = matchFields(q, r.sess.Name)
+		case rowWindow:
+			ok, _ = matchFields(q, r.win.Name, paneCommands(r.win)...)
+		}
+		if ok {
+			return r.key
+		}
+	}
+	return ""
 }
 
 // --- view ---------------------------------------------------------------------

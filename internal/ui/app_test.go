@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -930,12 +931,17 @@ func TestListKeysActOnTheRow(t *testing.T) {
 	for _, r := range "main" {
 		m.Update(key(string(r)))
 	}
-	if !strings.Contains(ansi.Strip(m.View()), "1 main") || m.listSel != "s:$1" {
-		t.Errorf("filtering 'main' should show notes › 1 main with the cursor on the first match, got %q:\n%s", m.listSel, ansi.Strip(m.View()))
+	// the cursor goes to the window that matches, not to its session (which
+	// is only listed as the match's parent)
+	if !strings.Contains(ansi.Strip(m.View()), "1 main") || m.listSel != "w:$1:@2" {
+		t.Errorf("filtering 'main' should show notes › 1 main with the cursor on it, got %q:\n%s", m.listSel, ansi.Strip(m.View()))
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if m.listFilter != "" || m.filtering {
 		t.Errorf("esc should clear the filter")
+	}
+	if m.listSel != "w:$1:@2" || !strings.Contains(ansi.Strip(m.View()), "1 main") {
+		t.Errorf("esc should keep the cursor on the match and unfold its session, got %q:\n%s", m.listSel, ansi.Strip(m.View()))
 	}
 }
 
@@ -1028,5 +1034,62 @@ func TestPrefixKeysGoBackToTmux(t *testing.T) {
 	}
 	if !m.focused {
 		t.Errorf("handing a key to tmux must not leave the sidebar")
+	}
+}
+
+func TestRenameOnEmptyPanelDoesNotPanic(t *testing.T) {
+	for _, panel := range []string{"2", "3"} {
+		m := newTestModel(t)
+		m.Update(key(panel))
+		m.Update(key("/"))
+		m.Update(key("zzzz")) // matches nothing
+		m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m.Update(key("r")) // panicked on a nil window / pane
+		if m.modal != nil {
+			t.Errorf("panel %s: r on an empty panel should do nothing, modal %T", panel, m.modal)
+		}
+	}
+}
+
+// Focus can leave the sidebar (enter switched away) before the switch
+// reports back: the popup must close then, and keys from a popup the
+// sidebar no longer has must not be acted on.
+func TestLeavingFocusClosesPopup(t *testing.T) {
+	m := focusedSidebar(t)
+	m.popupOpen = true
+	a, b := net.Pipe()
+	side, pop := newWireConn(a), newWireConn(b)
+	defer side.close()
+	defer pop.close()
+	m.Update(linkUp{conn: side})
+
+	_, cmd := m.Update(focusMsg{focused: false, paneW: 30, winW: 200, session: "$0"})
+	if m.popupOpen || cmd == nil {
+		t.Fatalf("losing focus should close the popup (open=%v, cmd=%v)", m.popupOpen, cmd != nil)
+	}
+	sel := m.listSel
+	j := tea.Key(key("j"))
+	_, cmd = m.Update(wireIn{conn: side, m: wire{Kind: "key", Key: &j}})
+	if m.listSel != sel {
+		t.Errorf("a key from a stale popup moved the unfocused sidebar")
+	}
+	if cmd == nil {
+		t.Errorf("a key from a stale popup should close it")
+	}
+	// switchMsg after the focus change: nothing left to close, no panic
+	m.Update(switchMsg{})
+}
+
+func TestDialogExpandsTildeInDir(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip(err)
+	}
+	var got []string
+	d := &inputModal{fields: []field{newField("Name", "x", false), newField("Dir", "~/src", true)},
+		onSubmit: func(v []string, _ int) tea.Cmd { got = v; return nil }}
+	d.update(tea.KeyMsg{Type: tea.KeyEnter})
+	if len(got) != 2 || got[1] != home+"/src" || got[0] != "x" {
+		t.Errorf("submitted %q, want the dir with ~ expanded to %s", got, home)
 	}
 }

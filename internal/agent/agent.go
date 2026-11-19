@@ -108,5 +108,8 @@ func AnswerKeys(k Kind, n int) []string {
 	case Aider:
 		return [][]string{{"y", "Enter"}, {"a", "Enter"}, {"n", "Enter"}}[n-1]
 	}
-	return []string{fmt.Sprint(n)} // Claude Code: the digit picks the option
+	// Claude Code: the digit picks yes / always. No is esc: the menu's last
+	// option moved (2.1 added "3. Yes, and switch to auto mode" before
+	// "4. No"), and esc rejects in every version.
+	return [][]string{{"1"}, {"2"}, {"Escape"}}[n-1]
 }

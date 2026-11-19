@@ -83,6 +83,9 @@ func (d *inputModal) update(k tea.KeyMsg) (tea.Cmd, bool) {
 		vals := make([]string, len(d.fields))
 		for i, f := range d.fields {
 			vals[i] = strings.TrimSpace(f.in.Value())
+			if f.dirComp { // tmux's -c does not expand ~ (it falls back to $HOME)
+				vals[i] = expandHome(vals[i])
+			}
 		}
 		return d.onSubmit(vals, d.radioSel), true
 	case tea.KeyTab:
@@ -179,18 +182,25 @@ func (d *inputModal) view(maxW, maxH int) string {
 	return renderFrame(stTitleOn.Render(" "+d.title+" "), hints, true, padLines(lines, 1), w, len(lines)+4, cBlue)
 }
 
+// expandHome turns a leading ~ (alone or ~/…) into the home directory.
+func expandHome(p string) string {
+	if p != "~" && !strings.HasPrefix(p, "~/") {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return p
+	}
+	return home + p[1:]
+}
+
 // completeDir extends a path to the longest common prefix of matching
 // directories (appending "/" when unique).
 func completeDir(p string) string {
 	if p == "" {
 		return p
 	}
-	expanded := p
-	if strings.HasPrefix(p, "~") {
-		if home, err := os.UserHomeDir(); err == nil {
-			expanded = home + p[1:]
-		}
-	}
+	expanded := expandHome(p)
 	dir, prefix := filepath.Split(expanded)
 	if dir == "" {
 		dir = "."

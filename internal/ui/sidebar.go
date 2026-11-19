@@ -100,8 +100,12 @@ func (m *Model) setFocused(f bool, session string) tea.Cmd {
 	if !f {
 		m.modal = nil // an open dialog or filter input does not survive leaving the sidebar
 		m.filtering, m.listFilter = false, ""
-		m.popupOpen, m.published = false, ""
-		return nil
+		m.published = ""
+		// Focus left (enter switched away, you moved to another pane…): the
+		// popup goes too. This can come before the switch reports back, so it
+		// must close the popup itself, or the popup stays on screen and keeps
+		// sending your keys to an unfocused sidebar.
+		return m.closePopup()
 	}
 	m.listDefault() // the agent that needs you, else your window
 	return tea.Batch(m.fetchTree(), m.openPopup(session), m.listSync())
@@ -150,6 +154,13 @@ func (m *Model) fromPopup(msg wireIn) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	wait := waitWire(m.conn)
+	if !m.focused || !m.popupOpen {
+		// a popup the sidebar no longer has (focus left before it closed):
+		// close it instead of acting on keys you cannot see the effect of
+		if w := msg.m.Kind; w == "key" || w == "hello" {
+			return m, tea.Batch(wait, m.closeStalePopup())
+		}
+	}
 	switch w := msg.m; w.Kind {
 	case "hello", "size":
 		m.popupW, m.popupH, m.overlaySent = w.W, w.H, "\x00"
@@ -282,6 +293,12 @@ func (m *Model) closePopup() tea.Cmd {
 		return nil
 	}
 	m.popupOpen = false
+	return m.closeStalePopup()
+}
+
+// closeStalePopup closes the popup on its client whatever the sidebar
+// believes about it.
+func (m *Model) closeStalePopup() tea.Cmd {
 	c, client := m.c, m.popupClient
 	return func() tea.Msg { c.ClosePopup(client); return nil }
 }

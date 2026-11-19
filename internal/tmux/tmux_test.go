@@ -415,3 +415,39 @@ func TestSidebarCycle(t *testing.T) {
 		t.Errorf("pressing it in the sidebar should close the sidebars")
 	}
 }
+
+// TestSwapWindowsKeepsCurrent: the session keeps showing the window it was
+// on, at its new index.
+func TestSwapWindowsKeepsCurrent(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	c := &Client{Socket: "lazymux-test-swap"}
+	c.Run("kill-server")
+	defer c.Run("kill-server")
+	sid, err := c.Run("-f", "/dev/null", "new-session", "-d", "-P", "-F", "#{session_id}", "-x", "120", "-y", "40")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cur, _ := c.Run("display-message", "-p", "-t", sid, "#{window_id}")
+	other, _, err := c.NewWindow(sid, "other", "/tmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SwapWindows(sid, cur, sid, other); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := c.Run("display-message", "-p", "-t", sid, "#{window_id} #{window_index}")
+	if got != cur+" 1" {
+		t.Errorf("current window after swap = %q, want %s at index 1", got, cur)
+	}
+	// on neither window: stays where it is
+	third, _, _ := c.NewWindow(sid, "third", "/tmp")
+	c.Run("select-window", "-t", sid+":"+third)
+	if err := c.SwapWindows(sid, cur, sid, other); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := c.Run("display-message", "-p", "-t", sid, "#{window_id}"); got != third {
+		t.Errorf("swapping two other windows moved the session to %s, want %s", got, third)
+	}
+}

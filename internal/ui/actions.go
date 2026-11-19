@@ -135,6 +135,9 @@ func (m *Model) renameCmd() tea.Cmd {
 	if s == nil {
 		return nil
 	}
+	if (m.focus == panelWindows && w == nil) || (m.focus == panelPanes && p == nil) {
+		return nil // the panel is empty (its filter matches nothing)
+	}
 	c := m.c
 	var d *inputModal
 	switch m.focus {
